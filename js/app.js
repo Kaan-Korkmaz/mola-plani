@@ -501,6 +501,67 @@ ${time('latestEnd', 'Tüm molalar en geç bitiş', st.latestEnd || '18:30')}
   });
 }
 
+// ---------- YARDIM ----------
+function renderYardim() {
+  const st = state.settings;
+  const q = (title, body) => `<details class="faq"><summary>${title}</summary><div>${body}</div></details>`;
+  $('#view').innerHTML = `
+    <div class="card"><h2>❓ Nasıl kullanılır?</h2>
+      <p class="muted" style="margin:0">Kısaca: <b>Kadro</b>'da haftayı gir → <b>Mola Planı</b>'na bak, gerekirse düzelt → <b>Çıktı</b>'dan gönder.</p></div>
+    <div class="card faq-list">
+      ${q('Uygulamayı program gibi nasıl açarım?', `<ul>
+        <li><b>iPhone:</b> Safari → Paylaş ⬆ → "Ana Ekrana Ekle".</li>
+        <li><b>Android:</b> Chrome ⋮ menü → "Ana ekrana ekle" / "Uygulamayı yükle".</li>
+        <li><b>Bilgisayar:</b> adres çubuğundaki "Yükle" simgesi.</li></ul>`)}
+      ${q('Kadroya kişi nasıl eklenir?', `<ul>
+        <li><b>Kadro</b> → <b>+ Kişi ekle</b>.</li>
+        <li>Ad soyad yaz, birimini seç (B2B, B2C, Mail, Satış).</li>
+        <li>Vardiya saatini seç, izin günlerine dokun.</li></ul>`)}
+      ${q('Haftanın vardiyası nasıl girilir?', `<ul>
+        <li>Kadro'da üstten <b>haftanın tarihini</b> seç.</li>
+        <li>Her kartta vardiya saatini seç: 08:00 / 09:00 / 10:30 ya da <b>Eğitim</b>.</li>
+        <li>İzin günlerine dokun (Pzt, Çar…) — sarı olur, o gün OFF sayılır.</li>
+        <li>Bir gün farklı saat, <b>Resmi tatil</b>, <b>İzinli</b> veya <b>Eğitim</b> için: altta <b>Haftalık vardiya planı</b>'nı aç, o günü değiştir.</li>
+        <li>Yeni hafta: üstteki ok ile ileri git (önceki hafta kopyalanır) ya da <b>Önceki haftayı kopyala</b>.</li></ul>`)}
+      ${q('Kim mola planına girmez?', `<ul>
+        <li>O gün OFF, Resmi tatil, İzinli veya <b>Eğitim</b>'de olanlar.</li>
+        <li>Kartında <b>"Mola planına dahil"</b> işareti kaldırılanlar.</li>
+        <li>Bunlar vardiya planında görünmeye devam eder.</li></ul>`)}
+      ${q('Mola planı hangi kurallarla oluşur?', `<ul>
+        <li>Kişi başı ${st.breakCount} × ${st.breakMin} dk mola + ${st.lunchMin} dk yemek.</li>
+        <li>Vardiyanın ilk ve son ${st.edgeMin} dk'sında mola yok; tüm molalar en geç <b>${st.latestEnd}</b> biter.</li>
+        <li>İki mola arası en az <b>${st.minGap} dk</b>, molasız en fazla <b>${Math.floor((st.maxGap ?? 165) / 60)} sa ${(st.maxGap ?? 165) % 60 ? ((st.maxGap ?? 165) % 60) + ' dk' : ''}</b> çalışılır.</li>
+        <li>Yemekler ${st.lunchWindow.start}'de başlar: önce sabahçılar, sonra öğlenciler, en son akşamcılar.</li>
+        <li>Aynı birim havuzunda aynı anda <b>en fazla 1 kişi yemekte, 1 kişi molada</b> (B2B+B2C+Satış bir havuz, Mail ayrı havuz).</li>
+        <li>Kalabalık günde yer kalmazsa, yemekte kimse yokken 2 kişi molaya çıkabilir — altta nedeniyle yazar.</li></ul>`)}
+      ${q('Bir molanın saatini nasıl değiştiririm?', `<ul>
+        <li>Mola Planı'nda saate dokun → yeni saati seç. Seçtiğin saat 🔒 kilitlenir, diğerleri ona göre yeniden dizilir.</li>
+        <li>Molalar her zaman saate göre 1., 2., 3. olarak sıralanır.</li>
+        <li>Çakışma olursa tablonun altında <b>Notlar</b>'da "kim kiminle çakışıyor" yazar.</li>
+        <li>Geri almak için: saate dokun → <b>Otomatiğe bırak</b>, ya da <b>Elle değişiklikleri sil</b>.</li></ul>`)}
+      ${q('Renkler ne anlama geliyor?', `<ul>
+        <li><span class="lg lunch"></span> Sarı: yemek.</li>
+        <li><span class="lg over"></span> Kırmızı dolu: ${st.lunchWindow.end} sonrasına sarkan yemek.</li>
+        <li><span class="lg bad"></span> Kırmızı çerçeve: kural dışı / çakışma.</li>
+        <li><span class="lg adj"></span> Turuncu: molalar arası ${st.minGap} dk'dan az.</li></ul>`)}
+      ${q('Yanlışlıkla birini sildim, ne yapmalıyım?', `<ul>
+        <li>Silince altta birkaç saniye <b>Geri al</b> çıkar.</li>
+        <li>Kaçırdıysan: Kadro → <b>Silinen kişiler</b> → <b>Geri ekle</b>.</li>
+        <li>İşten ayrılan kişi için oradan <b>Tamamen kaldır</b>.</li></ul>`)}
+      ${q('Planı ekibe nasıl gönderirim?', `<ul>
+        <li><b>Çıktı</b> → günün fotoğrafı, günün Excel'i veya haftalık mola Excel'i.</li>
+        <li>Haftalık <b>vardiya planı</b> (kim hangi gün hangi vardiyada) için de Excel/fotoğraf var.</li>
+        <li>Telefonda paylaş menüsü açılır, WhatsApp'ı seç.</li></ul>`)}
+      ${q('Verilerim nerede? Başka cihazda nasıl açarım?', `<ul>
+        <li>Her şey sadece bu cihazda saklanır, hiçbir yere gönderilmez.</li>
+        <li>Başka cihaza taşımak için: Çıktı → <b>Yedeği indir</b>, diğer cihazda <b>Yedekten yükle</b>.</li>
+        <li>Tarayıcı verisini silersen kayıt gider — ara sıra yedek al.</li></ul>`)}
+      ${q('Ayarlar ne işe yarar?', `<ul>
+        <li>Vardiya saatleri, mola/yemek süreleri, yemek aralığı, 18:30 sınırı, molalar arası süreler ve havuzlar buradan değişir.</li>
+        <li>Bozulursa <b>Kuralları varsayılana döndür</b>.</li></ul>`)}
+    </div>`;
+}
+
 // ---------- ÇIKTI ----------
 const fileDate = (i) => { const { m, d } = dateOf(i); return `${DAY_NAMES[i]}_${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}`; };
 
@@ -579,7 +640,7 @@ function renderCikti() {
 // ---------- Genel ----------
 function render() {
   renderTop();
-  ({ plan: renderPlan, kadro: renderVardiya, ayarlar: renderAyarlar, cikti: renderCikti })[tab]();
+  ({ plan: renderPlan, kadro: renderVardiya, ayarlar: renderAyarlar, yardim: renderYardim, cikti: renderCikti })[tab]();
 }
 
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (tab === 'cikti') render(); });

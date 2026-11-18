@@ -227,3 +227,10 @@ table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
 .sh-EGT { background: #fcd34d; }
 
 .del-card { border: 2px dashed #fca5a5; }
+
+.faq-list { padding: 4px 12px; }
+.faq { border-bottom: 1px solid var(--line); }
+.faq:last-child { border-bottom: 0; }
+.faq summary { padding: 12px 2px; font-weight: 700; cursor: pointer; }
+.faq ul { margin: 0 0 12px; padding-left: 20px; display: grid; gap: 4px; }
+.faq .lg { margin-right: 4px; }
