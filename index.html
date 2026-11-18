@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mola Planı</title>
+  <meta name="theme-color" content="#1e3a8a">
+  <meta name="description" content="Vardiyaya göre mola ve yemek planı">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mola Planı">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">☕ Mola Planı</div>
+    <div class="week-nav">
+      <button class="icon-btn" id="prevWeek" aria-label="Önceki hafta">‹</button>
+      <span id="weekLabel"></span>
+      <button class="icon-btn" id="nextWeek" aria-label="Sonraki hafta">›</button>
+    </div>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="plan" class="active">Plan</button>
+    <button data-tab="vardiya">Vardiya</button>
+    <button data-tab="kadro">Kadro</button>
+    <button data-tab="ayarlar">Ayarlar</button>
+    <button data-tab="cikti">Çıktı</button>
+  </nav>
+
+  <main id="view"></main>
+
+  <div class="modal-bg" id="modalBg" hidden>
+    <div class="modal" role="dialog" aria-modal="true" id="modal"></div>
+  </div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="vendor/xlsx.bundle.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
