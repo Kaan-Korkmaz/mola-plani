@@ -158,8 +158,8 @@ function planPool(rs, st, mode, locks, issues) {
   };
 
   const passes = [];
-  for (let g = st.minGap; g > 0; g -= Q) passes.push([g, true]);
-  passes.push([0, true], [st.minGap, false], [0, false]);
+  const G = st.minGap; // kesin alt sınır — asla altına inilmez
+  passes.push([G + 30, true], [G, true], [G + 30, false], [G, false]);
 
   let pending = items;
   for (const [gap, keepSide] of passes) {
@@ -178,7 +178,7 @@ function planPool(rs, st, mode, locks, issues) {
   for (const it of pending) {
     let done = false;
     for (const s of candidates(it)) {
-      if (!feasible(it, s, 0, true)) continue;
+      if (!feasible(it, s, G, true)) continue;
       const blockers = rs.flatMap((r) => r.breaks.filter((b) => !b.locked && overlaps(b, { start: s, end: s + B })).map((b) => ({ r, b })));
       if (blockers.length !== 1) continue;
       const { r: br, b } = blockers[0];
@@ -186,7 +186,7 @@ function planPool(rs, st, mode, locks, issues) {
       const bIdx = br.breaks.indexOf(b);
       br.breaks.splice(bIdx, 1);
       it.r.breaks.push({ start: s, end: s + B, key: it.key, locked: false });
-      const alt = candidates(bit).find((c) => feasible(bit, c, 0));
+      const alt = candidates(bit).find((c) => feasible(bit, c, G));
       if (alt != null) {
         br.breaks.push({ start: alt, end: alt + B, key: b.key, locked: false });
         done = true;
@@ -214,7 +214,7 @@ function breakTargets(r, st) {
   const len1 = Math.max(0, seg1[1] - seg1[0]), len2 = Math.max(0, seg2[1] - seg2[0]);
   // Tercih: son mola hariç hepsi yemekten önce (tablo sırası: 1. Mola, 2. Mola, Yemek, 3. Mola).
   // Yemekten önce yeterli yer yoksa sığdığı kadar.
-  let n1 = Math.min(k - 1, Math.floor((len1 + B) / (B + 45)));
+  let n1 = Math.min(k - 1, Math.floor((len1 + B) / (B + st.minGap)));
   if (len2 < B) n1 = k;
   n1 = Math.max(0, n1);
   const spread = ([a, b], m) => Array.from({ length: m }, (_, i) => roundQ(a + ((b - a) * (i + 1)) / (m + 1)));
@@ -236,8 +236,12 @@ export function validateDay(plan, st) {
       for (let j = i + 1; j < evs.length; j++)
         if (overlaps(evs[i], evs[j]))
           out.push({ level: 'error', personId: r.id, text: `${r.label}: ${evs[i].name} ${fmt(evs[i].start)} ile ${evs[j].name} ${fmt(evs[j].start)} çakışıyor` });
-        else if (evs[i].end === evs[j].start || evs[j].end === evs[i].start)
-          out.push({ level: 'warn', personId: r.id, text: `${r.label}: ${evs[i].name} ${fmt(evs[i].start)} ve ${evs[j].name} ${fmt(evs[j].start)} arka arkaya` });
+        else {
+          const [a, b] = evs[i].start < evs[j].start ? [evs[i], evs[j]] : [evs[j], evs[i]];
+          const gap = b.start - a.end;
+          if (gap < st.minGap)
+            out.push({ level: 'error', personId: r.id, text: `${r.label}: ${a.name} ${fmt(a.start)} ile ${b.name} ${fmt(b.start)} arası ${gap} dk — en az ${st.minGap} dk olmalı` });
+        }
   }
   const poolIds = [...new Set(plan.rows.map((r) => r.pool))];
   for (const pool of poolIds) {

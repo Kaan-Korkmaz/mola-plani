@@ -41,9 +41,12 @@ for (const mode of ['sarksin', 'sarkmasin']) {
         const sh = S.shifts[r.shift];
         const lo = toMin(sh.start) + 60, hi = toMin(sh.end) - 60;
         assert.ok(r.lunch, `gün ${d} ${r.label} yemek yok`);
-        assert.equal(r.breaks.length, 3, `gün ${d} ${r.label} mola sayısı`);
+        if (mode === 'sarksin') assert.equal(r.breaks.length, 3, `gün ${d} ${r.label} mola sayısı`);
         for (const e of [r.lunch, ...r.breaks]) assert.ok(e.start >= lo && e.end <= hi, `gün ${d} ${r.label} pencere`);
         r.breaks.forEach((b) => assert.ok(!overlaps(b, r.lunch), `gün ${d} ${r.label} yemekle çakışma`));
+        const evs = [r.lunch, ...r.breaks].sort((a, b) => a.start - b.start);
+        for (let k = 1; k < evs.length; k++)
+          assert.ok(evs[k].start - evs[k - 1].end >= 60, `gün ${d} ${r.label}: ${evs[k - 1].start}→${evs[k].start} 1 saatten az`);
       }
       for (const pool of [1, 2]) {
         const rows = plan.rows.filter((r) => r.pool === pool);
@@ -53,8 +56,9 @@ for (const mode of ['sarksin', 'sarkmasin']) {
           assert.ok(nb <= 1, `gün ${d} havuz ${pool} ${t} aynı anda ${nb} mola`);
         }
       }
-      const errs = validateDay(plan, S).filter((i) => i.level === 'error');
+      const errs = plan.issues.filter((i) => i.level === 'error' && !(mode === 'sarkmasin' && /yerleştirilemedi/.test(i.text)));
       assert.deepEqual(errs, [], `gün ${d}`);
+      if (mode === 'sarksin') assert.deepEqual(plan.issues.filter((i) => i.level === 'error'), [], `gün ${d}`);
     }
   });
 }

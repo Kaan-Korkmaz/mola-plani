@@ -80,6 +80,7 @@ function daySection(i, view) {
   const pools = Object.entries(plan.pools).map(([p, info]) =>
     `<span class="pill ${info.needsChoice ? 'bad' : ''}">${esc(st.poolNames[p] || 'Havuz ' + p)}: ${info.count} kişi</span>`).join('');
 
+  const unplaced = plan.issues.filter((x) => x.level === 'error' && /yerleştirilemedi/.test(x.text)).length;
   const overflow = needs.length ? `
     <div class="ovbox">
       <b>Yemek fazlası:</b> <span class="muted">${needs.map(([p, info]) => `${esc(st.poolNames[p])} ${info.count} kişi, ${st.lunchWindow.start}–${st.lunchWindow.end} arasına ${info.capacity} yemek sığıyor.`).join(' ')}</span>
@@ -92,6 +93,7 @@ function daySection(i, view) {
           ? `${st.lunchWindow.end} sonrasına sarkanlar <b style="color:var(--bad)">kırmızı</b>.`
           : `Yemekler ${st.lunchWindow.end}'da biter; son dilimlerde 2 kişi aynı anda yemekte, o sırada mola yok.`}</span>
       </div>
+      ${mode === 'sarkmasin' && unplaced ? `<p style="margin:8px 0 0;color:var(--bad);font-weight:600">Bu gün "Sarkmasın" ile ${unplaced} mola kurallara (aynı anda 1 kişi, molalar arası en az ${st.minGap} dk) sığmıyor. "Sarksın" seçersen hepsi sığar.</p>` : ''}
     </div>` : '';
 
   const issuesHtml = errors.length || warns.length
@@ -197,7 +199,7 @@ function tableHtml(plan, di) {
     if (row.poolHeader) { out += `<tr class="pool"><td colspan="${vis.length}">${esc(row.poolHeader)} · ${row.count} kişi</td></tr>`; continue; }
     const r = row.r;
     const evs = [...(r.lunch ? [r.lunch] : []), ...r.breaks];
-    const adj = (e) => evs.some((o) => o !== e && (o.end === e.start || e.end === o.start));
+    const adj = (e) => evs.some((o) => o !== e && (o.start >= e.end ? o.start - e.end : e.start - o.end) < st.minGap);
     out += `<tr class="${row.groupStart ? 'gstart' : ''}">`;
     cols.forEach((c, i) => {
       const cell = row.cells[i];
@@ -212,7 +214,7 @@ function tableHtml(plan, di) {
     out += '</tr>';
   }
   return out + `</tbody></table></div>
-    <div class="legend muted"><span class="lg lunch"></span>Yemek <span class="lg over"></span>${st.lunchWindow.end} sonrası <span class="lg adj"></span>Arka arkaya <span class="lg bad"></span>Kural dışı · Saate dokunup değiştirebilirsin</div>`;
+    <div class="legend muted"><span class="lg lunch"></span>Yemek <span class="lg over"></span>${st.lunchWindow.end} sonrası <span class="lg adj"></span>Molalar arası ${st.minGap} dk'dan az <span class="lg bad"></span>Kural dışı · Saate dokunup değiştirebilirsin</div>`;
 }
 
 function groupByPool(plan) {
@@ -432,7 +434,7 @@ function renderAyarlar() {
       ${time('lunchWindow.end', 'Yemek bitiş', st.lunchWindow.end)}
       ${num('capacity.break', 'Aynı anda molada (havuz başı)', st.capacity.break)}
       ${num('capacity.lunch', 'Aynı anda yemekte (havuz başı)', st.capacity.lunch)}
-      ${num('minGap', 'Kişinin molaları arası hedef (dk)', st.minGap, 15)}
+      ${num('minGap', 'Kişinin molaları arası en az (dk)', st.minGap, 15)}
       <div class="field"><label>10'dan fazla kişide varsayılan</label><select data-path="defaultOverflow">
         <option value="sarksin" ${st.defaultOverflow === 'sarksin' ? 'selected' : ''}>Sarksın</option>
         <option value="sarkmasin" ${st.defaultOverflow === 'sarkmasin' ? 'selected' : ''}>Sarkmasın</option></select></div>
