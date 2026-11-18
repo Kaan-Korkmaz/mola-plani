@@ -198,7 +198,7 @@ table.grid tr.excluded td { opacity: .45; }
 /* Haftalık hızlı giriş */
 .wk-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 8px; }
 .wk { background: #fff; border-radius: 12px; padding: 10px; box-shadow: 0 1px 2px rgba(0,0,0,.06); display: grid; gap: 8px; }
-.wk.excluded { opacity: .5; }
+.wk.excluded > :not(.wk-bot) { opacity: .45; }
 .wk-top { display: grid; grid-template-columns: 1fr 90px; gap: 6px; }
 .wk-top input, .wk-top select { padding: 8px; border: 1px solid var(--line); border-radius: 8px; min-width: 0; background: #fff; }
 .wk-name { font-weight: 700; }
@@ -209,3 +209,5 @@ table.grid tr.excluded td { opacity: .45; }
 .wk-off { flex-wrap: nowrap !important; }
 .offc.on { background: var(--OFF); border-color: #eab308; }
 details > summary { cursor: pointer; }
+
+.wk-bot { display: flex; justify-content: space-between; align-items: center; }

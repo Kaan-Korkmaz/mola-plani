@@ -2,7 +2,6 @@ import { generateDay, toMin, fmt } from './scheduler.js';
 import { DEFAULT_SETTINGS, DAY_NAMES } from './defaults.js';
 import { load, save, reset, ensureWeek, copyWeek, addDays, mondayOf, exportBackup, importBackup, newId } from './store.js';
 import { xlsxBlob, pngBlob, shareOrDownload, dayTable } from './export.js';
-import { parseShiftSheet } from './importer.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -322,23 +321,25 @@ function renderVardiya() {
       <div class="wk-off"><span class="muted">İzin:</span>
         ${DAY_NAMES.map((n, d) => `<button class="offc ${w.shifts[p.id][d] === 'OFF' ? 'on' : ''}" data-off="${p.id}" data-d="${d}">${n}</button>`).join('')}
       </div>
-      ${p.included ? '' : '<div class="muted" style="font-size:12px">Plana dahil değil (Kadro sekmesinden değişir)</div>'}
+      <div class="wk-bot">
+        <label class="switch"><input type="checkbox" data-inc="${p.id}" ${p.included ? 'checked' : ''}> Mola planına dahil</label>
+        <button class="btn small danger" data-del="${p.id}" aria-label="Sil">✕ Sil</button>
+      </div>
     </div>`;
   }).join('');
   const head = DAY_NAMES.map((n, d) => `<th>${n}<br><small>${dayShort(d)}</small></th>`).join('');
   const rows = state.people.map((p) => `<tr class="${p.included ? '' : 'excluded'}"><td class="name">${esc(p.label)} <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span></td>
     ${w.shifts[p.id].map((v, d) => `<td><select class="sh sh-${v}" data-pid="${p.id}" data-d="${d}">${opts(v)}</select></td>`).join('')}</tr>`).join('');
   $('#view').innerHTML = `
-    <div class="card"><h2>Haftalık vardiya</h2>
+    <div class="card"><h2>Kadro · haftalık vardiya</h2>
       <div class="row">
         <div class="field"><label>Haftanın tarihi</label><input type="date" id="wkDate" value="${state.current.week}"></div>
         <span class="muted">${esc($('#weekLabel').textContent)}</span>
       </div>
-      <p class="muted" style="margin:8px 0 0">Her kişi için adını, vardiya saatini ve izin günlerini (1–2 gün) seç. Tablo ve molalar otomatik oluşur.</p>
+      <p class="muted" style="margin:8px 0 0">Her kişi için adını, kanalını, vardiya saatini ve izin günlerini (1–2 gün) seç. Mola tablosu otomatik oluşur. İsimler sadece bu cihazda kalır.</p>
       <div class="row" style="margin-top:8px">
         <button class="btn small primary" id="addP2">+ Kişi ekle</button>
         <button class="btn small" id="copyPrev">⟲ Önceki haftayı kopyala</button>
-        <label class="btn small">📥 Excel'den yükle<input type="file" id="impX" accept=".xlsx,.xls,.csv" hidden></label>
       </div></div>
     <div class="wk-list">${cards}</div>
     <div class="row" style="margin:12px 0"><button class="btn primary" id="toPlan">✔ Mola planını gör</button></div>
@@ -378,6 +379,17 @@ function renderVardiya() {
   v.querySelectorAll('select.sh[data-pid]').forEach((s) => (s.onchange = () => {
     w.shifts[s.dataset.pid][+s.dataset.d] = s.value; rerender();
   }));
+  v.querySelectorAll('[data-inc]').forEach((el) => (el.onchange = () => {
+    state.people.find((x) => x.id === el.dataset.inc).included = el.checked; rerender();
+  }));
+  v.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => {
+    const p = state.people.find((x) => x.id === b.dataset.del);
+    confirmBox(`${p.label || 'Bu kişi'} kadrodan silinsin mi?`, 'Sil', () => {
+      state.people = state.people.filter((x) => x.id !== p.id);
+      for (const wk of Object.values(state.weeks)) { delete wk.shifts[p.id]; wk.days.forEach((d) => delete d.locks[p.id]); }
+      persist(); render();
+    });
+  }));
   $('#addP2').onclick = () => {
     const id = newId(state);
     state.people.push({ id, label: '', group: 'B2C', included: true });
@@ -387,7 +399,6 @@ function renderVardiya() {
     const inp = [...document.querySelectorAll('.wk-name')].at(-1); inp.scrollIntoView({ block: 'center' }); inp.focus();
   };
   $('#toPlan').onclick = () => { tab = 'plan'; state.current.all = true; persist(); render(); window.scrollTo(0, 0); };
-  $('#impX').onchange = (e) => { const f = e.target.files[0]; if (f) importShiftFile(f); e.target.value = ''; };
   $('#copyPrev').onclick = () => {
     const prev = addDays(state.current.week, -7);
     if (!state.weeks[prev]) return toast('Önceki haftanın kaydı yok');
@@ -399,93 +410,6 @@ function renderVardiya() {
     for (const id in w.shifts) w.shifts[id] = Array(7).fill('OFF');
     w.days.forEach((d) => (d.locks = {})); persist(); render();
   });
-}
-
-const normName = (s) => String(s).trim().toLocaleLowerCase('tr').replace(/\s+/g, ' ');
-
-async function importShiftFile(file) {
-  try {
-    const XLSX = globalThis.XLSX;
-    const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null });
-    const res = parseShiftSheet(aoa, state.settings);
-    const key = res.firstDate ? mondayOf(res.firstDate) : state.current.week;
-    const w = ensureWeek(state, key);
-    let added = 0;
-    const seen = new Set();
-    for (const row of res.rows) {
-      let p = state.people.find((x) => normName(x.label) === normName(row.name));
-      if (!p) {
-        p = { id: newId(state), label: row.name, group: row.group, included: true };
-        state.people.push(p); added++;
-        for (const wk of Object.values(state.weeks)) wk.shifts[p.id] ||= Array(7).fill('OFF');
-      } else p.group = row.group;
-      w.shifts[p.id] = row.shifts;
-      seen.add(p.id);
-    }
-    for (const p of state.people) if (!seen.has(p.id)) w.shifts[p.id] = Array(7).fill('OFF');
-    w.days.forEach((d) => (d.locks = {}));
-    state.current.week = key;
-    persist(); render();
-    const excluded = state.people.filter((p) => seen.has(p.id) && !p.included).map((p) => p.label);
-    openModal(`<h2>Vardiya yüklendi ✔</h2>
-      <p>${res.rows.length} kişi okundu${added ? `, ${added} yeni kişi kadroya eklendi` : ''}. Hafta: <b>${esc($('#weekLabel').textContent)}</b></p>
-      ${excluded.length ? `<p class="muted">Plana dahil olmayanlar (Kadro'dan değişir): ${esc(excluded.join(', '))}</p>` : ''}
-      ${added ? '<p class="muted">Yeni kişileri plana dahil etmek istemiyorsan Kadro sekmesinden kapat.</p>' : ''}
-      ${res.warnings.length ? `<ul class="issues">${res.warnings.map((x) => `<li class="warn">⚠️ ${esc(x)}</li>`).join('')}</ul>` : ''}
-      <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn primary" data-go>Mola planına git</button></div>`, (m) => {
-      $('[data-go]', m).onclick = () => { closeModal(); tab = 'plan'; state.current.all = true; persist(); render(); window.scrollTo(0, 0); };
-    });
-  } catch (err) {
-    openModal(`<h2>Dosya okunamadı</h2><p>${esc(err.message || err)}</p><div class="row" style="justify-content:flex-end"><button class="btn" data-x>Tamam</button></div>`,
-      (m) => ($('[data-x]', m).onclick = closeModal));
-  }
-}
-
-// ---------- KADRO ----------
-function renderKadro() {
-  const st = state.settings;
-  const gopts = (g) => st.groups.map((x) => `<option ${x === g ? 'selected' : ''}>${esc(x)}</option>`).join('');
-  $('#view').innerHTML = `
-    <div class="card"><h2>Kadro</h2>
-      <p class="muted" style="margin:0">İsim yazabilirsin — sadece bu cihazda kalır, hiçbir yere gönderilmez. "Plana dahil" kapalı olan kişi mola planında görünmez.</p></div>
-    <div class="kadro">${state.people.map((p, i) => `
-      <div class="kadro-row">
-        <input value="${esc(p.label)}" data-k="label" data-i="${i}" aria-label="İsim">
-        <select data-k="group" data-i="${i}">${gopts(p.group)}</select>
-        <label class="switch"><input type="checkbox" data-k="included" data-i="${i}" ${p.included ? 'checked' : ''}> Plana dahil</label>
-        <div class="acts">
-          <button class="btn small" data-up="${i}" aria-label="Yukarı">↑</button>
-          <button class="btn small" data-down="${i}" aria-label="Aşağı">↓</button>
-          <button class="btn small danger" data-del="${i}" aria-label="Sil">✕</button>
-        </div>
-      </div>`).join('')}</div>
-    <div class="row" style="margin-top:12px"><button class="btn primary" id="addP">+ Kişi ekle</button></div>`;
-  const v = $('#view');
-  v.querySelectorAll('[data-k]').forEach((el) => (el.onchange = () => {
-    const p = state.people[+el.dataset.i];
-    p[el.dataset.k] = el.type === 'checkbox' ? el.checked : el.value.trim() || p.label;
-    persist();
-  }));
-  const move = (i, d) => { const a = state.people; const j = i + d; if (j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; persist(); render(); };
-  v.querySelectorAll('[data-up]').forEach((b) => (b.onclick = () => move(+b.dataset.up, -1)));
-  v.querySelectorAll('[data-down]').forEach((b) => (b.onclick = () => move(+b.dataset.down, 1)));
-  v.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => {
-    const p = state.people[+b.dataset.del];
-    confirmBox(`${p.label} kadrodan silinsin mi?`, 'Sil', () => {
-      state.people.splice(+b.dataset.del, 1);
-      for (const w of Object.values(state.weeks)) { delete w.shifts[p.id]; w.days.forEach((d) => delete d.locks[p.id]); }
-      persist(); render();
-    });
-  }));
-  $('#addP').onclick = () => {
-    const id = newId(state);
-    state.people.push({ id, label: `Kişi ${state.people.length + 1}`, group: 'B2C', included: true });
-    for (const w of Object.values(state.weeks)) w.shifts[id] = Array(7).fill('OFF');
-    persist(); render();
-    toast('Eklendi — Vardiya sekmesinden günlerini seç');
-  };
 }
 
 // ---------- AYARLAR ----------
@@ -605,7 +529,7 @@ function renderCikti() {
 // ---------- Genel ----------
 function render() {
   renderTop();
-  ({ plan: renderPlan, vardiya: renderVardiya, kadro: renderKadro, ayarlar: renderAyarlar, cikti: renderCikti })[tab]();
+  ({ plan: renderPlan, kadro: renderVardiya, ayarlar: renderAyarlar, cikti: renderCikti })[tab]();
 }
 
 window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEvt = e; if (tab === 'cikti') render(); });
