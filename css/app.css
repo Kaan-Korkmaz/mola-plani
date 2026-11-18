@@ -225,3 +225,5 @@ table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
 .del-row { padding: 6px 0; border-top: 1px solid var(--line); }
 
 .sh-EGT { background: #fcd34d; }
+
+.del-card { border: 2px dashed #fca5a5; }

@@ -354,9 +354,15 @@ function renderVardiya() {
       <div class="row" style="margin-top:8px">
         <button class="btn small primary" id="addP2">+ Kişi ekle</button>
         <button class="btn small" id="copyPrev">⟲ Önceki haftayı kopyala</button>
+        ${state.people.some((p) => p.deleted) ? `<button class="btn small" id="goDel">🗑 Silinenler (${state.people.filter((p) => p.deleted).length})</button>` : ''}
       </div></div>
     <div class="wk-list">${cards}</div>
     <div class="row" style="margin:12px 0"><button class="btn primary" id="toPlan">✔ Mola planını gör</button></div>
+    ${state.people.some((p) => p.deleted) ? `<div class="card del-card" id="delCard"><h2>🗑 Silinen kişiler (${state.people.filter((p) => p.deleted).length})</h2>
+      <p class="muted" style="margin:0 0 8px">Yanlışlıkla sildiysen geri ekle. İşten ayrılan kişiyi "Tamamen kaldır" ile sil.</p>
+      ${state.people.filter((p) => p.deleted).map((p) => `<div class="row del-row"><b>${esc(p.label || 'İsimsiz')}</b> <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span>
+        <span style="flex:1"></span><button class="btn small" data-restore="${p.id}">↩ Geri ekle</button>
+        <button class="btn small danger" data-purge="${p.id}">Tamamen kaldır</button></div>`).join('')}</div>` : ''}
     <details class="card"><summary><b>Haftalık vardiya planı</b> <span class="muted">— gün gün saat, OFF, Resmi tatil, İzinli</span></summary>
       <div class="tbl-wrap" style="margin-top:8px"><table class="grid"><thead><tr><th>Kişi</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="row" style="margin-top:8px">
@@ -365,11 +371,7 @@ function renderVardiya() {
         <span style="flex:1"></span>
         <button class="btn small danger" id="clearWeek">Haftayı OFF yap</button></div>
     </details>
-    ${state.people.some((p) => p.deleted) ? `<div class="card"><h2>Silinen kişiler</h2>
-      <p class="muted" style="margin:0 0 8px">Yanlışlıkla sildiysen geri ekle. İşten ayrılan kişiyi "Tamamen kaldır" ile sil.</p>
-      ${state.people.filter((p) => p.deleted).map((p) => `<div class="row del-row"><b>${esc(p.label || 'İsimsiz')}</b> <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span>
-        <span style="flex:1"></span><button class="btn small" data-restore="${p.id}">↩ Geri ekle</button>
-        <button class="btn small danger" data-purge="${p.id}">Tamamen kaldır</button></div>`).join('')}</div>` : ''}`;
+`;
   const v = $('#view');
   const rerender = () => { const y = window.scrollY; const open = v.querySelector('details')?.open; persist(); render(); if (open) v.querySelector('details').open = true; window.scrollTo(0, y); };
   $('#wkDate').onchange = (e) => {
@@ -421,6 +423,7 @@ function renderVardiya() {
       persist(); render();
     });
   }));
+  $('#goDel')?.addEventListener('click', () => $('#delCard').scrollIntoView({ behavior: 'smooth', block: 'center' }));
   $('#shX').onclick = () => doShift('xlsx');
   $('#shP').onclick = () => doShift('png');
   $('#addP2').onclick = () => {
