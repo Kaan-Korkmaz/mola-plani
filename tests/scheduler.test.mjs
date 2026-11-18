@@ -74,3 +74,20 @@ test('off_haric: OFF ve plana dahil olmayanlar yok', () => {
   assert.ok(!ids.includes('p12')); // plana dahil değil
   assert.ok(!ids.includes('p15')); // Pzt OFF
 });
+
+test('az_kisi: Mail 2 kişi → yemekler vardiyaya göre yayılır (11:00 sabahçı, 15:30 akşamcı)', () => {
+  const plan = gen(0);
+  const mail = plan.rows.filter((r) => r.pool === 2).sort((a, b) => a.shiftStart - b.shiftStart);
+  assert.equal(mail[0].shift, 'S');
+  assert.equal(mail[0].lunch.start, toMin('11:00'));
+  assert.equal(mail[1].shift, 'A');
+  assert.equal(mail[1].lunch.start, toMin('15:30'));
+});
+
+test('az_kisi: hafta sonu 1. havuz yemekleri 16:00 öncesi ve sıra vardiyaya göre', () => {
+  const plan = gen(6); // Pazar
+  const rs = pool1(plan).sort((a, b) => a.shiftStart - b.shiftStart || a.lunch.start - b.lunch.start);
+  rs.forEach((r) => assert.ok(r.lunch.end <= toMin('16:00')));
+  for (let i = 1; i < rs.length; i++) assert.ok(rs[i].lunch.start >= rs[i - 1].lunch.start, 'sıra korunur');
+  assert.ok(rs.at(-1).lunch.start - rs[0].lunch.start >= 180, 'yayılmış');
+});

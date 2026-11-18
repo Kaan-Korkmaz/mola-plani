@@ -84,6 +84,25 @@ function planPool(rs, st, mode, locks, issues) {
     if (lk != null) r.lunch = { start: lk, end: lk + L, locked: true };
   }
   const ordered = [...rs].sort((a, b) => a.shiftStart - b.shiftStart || a.order - b.order);
+  const slotFree = (s) => {
+    for (let t = s; t < s + L; t += Q) if (lunchOcc(t, t + Q) >= lunchCap(s)) return false;
+    return true;
+  };
+  // Kişi az ise (aralığa rahat sığıyorsa) yemekleri 11:00–16:00'ya vardiya sırasıyla yay:
+  // sabahçı başta, akşamcı sonda. Kalabalıkta arka arkaya dizilir (aşağıdaki döngü).
+  if (!needsChoice) {
+    const SHIFT_POS = { S: 0, O: 0.5, A: 1 };
+    ordered.forEach((r, i) => {
+      if (r.lunch) return;
+      const frac = n > 1 ? i / (n - 1) : SHIFT_POS[r.shift] ?? 0;
+      const desired = lw0 + Math.round(frac * (slotCount - 1)) * L;
+      const cands = [];
+      for (let s = lw0; s + L <= lw1; s += L) if (s >= r.winStart && s + L <= r.winEnd) cands.push(s);
+      cands.sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired) || b - a);
+      const s = cands.find(slotFree);
+      if (s != null) r.lunch = { start: s, end: s + L, locked: false };
+    });
+  }
   for (const r of ordered) {
     if (r.lunch) continue;
     const limit = strict ? Math.min(lw1, r.winEnd) : r.winEnd;
