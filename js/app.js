@@ -1,5 +1,5 @@
 import { generateDay, toMin, fmt } from './scheduler.js';
-import { DEFAULT_SETTINGS, DAY_NAMES } from './defaults.js';
+import { DEFAULT_SETTINGS, DAY_NAMES, NONWORK } from './defaults.js';
 import { load, save, reset, ensureWeek, copyWeek, addDays, mondayOf, exportBackup, importBackup, newId } from './store.js';
 import { xlsxBlob, pngBlob, shareOrDownload, dayTable } from './export.js';
 
@@ -18,24 +18,27 @@ const week = () => ensureWeek(state, state.current.week);
 const dateOf = (i) => { const [y, m, d] = addDays(state.current.week, i).split('-').map(Number); return { y, m, d }; };
 const dayShort = (i) => { const { m, d } = dateOf(i); return `${d} ${MONTHS[m - 1]}`; };
 const dayTitle = (i) => { const { y, m, d } = dateOf(i); return `${DAY_LONG[i]} ${String(d).padStart(2, '0')}.${String(m).padStart(2, '0')}.${y}`; };
+const isOff = (v) => !v || v in NONWORK;
+const active = () => state.people.filter((p) => !p.deleted);
 const groupClass = (g) => (['B2B', 'B2C', 'Satış', 'Mail'].includes(g) ? `g-${g}` : 'g-other');
 
 function planFor(i) {
   const w = week();
   const day = w.days[i];
   return generateDay({
-    people: state.people,
+    people: active(),
     shifts: Object.fromEntries(Object.entries(w.shifts).map(([id, arr]) => [id, arr[i]])),
     settings: state.settings,
-    overflowMode: day.overflowMode || state.settings.defaultOverflow,
     locks: day.locks,
   });
 }
 
-function toast(msg) {
+function toast(msg, actionLabel, onAction) {
   const t = $('#toast');
-  t.textContent = msg; t.hidden = false;
-  clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), 2600);
+  t.innerHTML = esc(msg) + (actionLabel ? ` <button class="toast-btn">${esc(actionLabel)}</button>` : '');
+  t.hidden = false;
+  if (actionLabel) t.querySelector('.toast-btn').onclick = () => { t.hidden = true; onAction(); };
+  clearTimeout(toast.t); toast.t = setTimeout(() => (t.hidden = true), actionLabel ? 7000 : 2600);
 }
 
 function openModal(html, bind) {
@@ -72,7 +75,6 @@ function daySection(i, view) {
   const plan = planFor(i);
   const st = state.settings;
   const day = week().days[i];
-  const mode = day.overflowMode || st.defaultOverflow;
   const needs = Object.entries(plan.pools).filter(([, p]) => p.needsChoice);
   const errors = plan.issues.filter((x) => x.level === 'error');
   const warns = plan.issues.filter((x) => x.level === 'warn');
@@ -80,21 +82,14 @@ function daySection(i, view) {
   const pools = Object.entries(plan.pools).map(([p, info]) =>
     `<span class="pill ${info.needsChoice ? 'bad' : ''}">${esc(st.poolNames[p] || 'Havuz ' + p)}: ${info.count} kişi</span>`).join('');
 
-  const unplaced = plan.issues.filter((x) => x.level === 'error' && /yerleştirilemedi/.test(x.text)).length;
   const overflow = needs.length ? `
-    <div class="ovbox">
-      <b>Yemek fazlası:</b> <span class="muted">${needs.map(([p, info]) => `${esc(st.poolNames[p])} ${info.count} kişi, ${st.lunchWindow.start}–${st.lunchWindow.end} arasına ${info.capacity} yemek sığıyor.`).join(' ')}</span>
-      <div class="row" style="margin-top:6px">
-        <div class="seg">
-          <button data-ov="sarksin" data-day="${i}" class="${mode === 'sarksin' ? 'active' : ''}">Sarksın</button>
-          <button data-ov="sarkmasin" data-day="${i}" class="${mode === 'sarkmasin' ? 'active' : ''}">Sarkmasın</button>
-        </div>
-        <span class="muted">${mode === 'sarksin'
-          ? `${st.lunchWindow.end} sonrasına sarkanlar <b style="color:var(--bad)">kırmızı</b>.`
-          : `Yemekler ${st.lunchWindow.end}'da biter; son dilimlerde 2 kişi aynı anda yemekte, o sırada mola yok.`}</span>
-      </div>
-      ${mode === 'sarkmasin' && unplaced ? `<p style="margin:8px 0 0;color:var(--bad);font-weight:600">Bu gün "Sarkmasın" ile ${unplaced} mola kurallara (aynı anda 1 kişi, molalar arası en az ${st.minGap} dk) sığmıyor. "Sarksın" seçersen hepsi sığar.</p>` : ''}
-    </div>` : '';
+    <div class="ovbox"><b>Yemek fazlası:</b> <span class="muted">${needs.map(([p, info]) => `${esc(st.poolNames[p])} ${info.count} kişi; ${st.lunchWindow.start}–${st.lunchWindow.end} arasına ${info.capacity} yemek sığıyor.`).join(' ')}
+      Yemekler tek tek devam eder, ${st.lunchWindow.end} sonrasına sarkanlar <b style="color:var(--bad)">kırmızı</b>. Tüm molalar en geç ${st.latestEnd} biter.</span></div>` : '';
+
+  // O gün çalışmayanlar (OFF / Resmi tatil / İzinli)
+  const offs = {};
+  for (const p of active()) { const v = week().shifts[p.id]?.[i]; if (isOff(v)) (offs[v || 'OFF'] ||= []).push(p.label); }
+  const offHtml = Object.keys(offs).length ? `<div class="muted" style="margin-top:6px">${Object.entries(offs).map(([k, names]) => `<b>${NONWORK[k]}:</b> ${esc(names.join(', '))}`).join(' · ')}</div>` : '';
 
   const issuesHtml = errors.length || warns.length
     ? `<ul class="issues">${[...errors, ...warns].map((x) => `<li class="${x.level}">${x.level === 'error' ? '⛔' : '⚠️'} ${esc(x.text)}</li>`).join('')}</ul>`
@@ -110,6 +105,7 @@ function daySection(i, view) {
         ? `<div class="sum-bad">⛔ ${errors.length} sorun var — ayrıntılar tablonun altında</div>`
         : `<div class="ok-line">✔ Tüm kurallar sağlanıyor</div>`) : ''}
       ${overflow}
+      ${offHtml}
       ${lockCount ? `<div class="row" style="margin-top:8px"><button class="btn small" data-clear="${i}">Elle değişiklikleri sil (${lockCount})</button></div>` : ''}
     </div>
     ${body}
@@ -151,7 +147,6 @@ function renderPlan() {
   };
   $('#viewSeg').onclick = (e) => { const b = e.target.closest('button'); if (b) { state.current.mode = b.dataset.v; persist(); render(); } };
   const v = $('#view');
-  v.querySelectorAll('[data-ov]').forEach((b) => (b.onclick = () => { week().days[+b.dataset.day].overflowMode = b.dataset.ov; persist(); render(); }));
   v.querySelectorAll('[data-clear]').forEach((b) => (b.onclick = () => confirmBox(`${dayTitle(+b.dataset.clear)}: elle değişiklikler silinsin mi?`, 'Sil', () => {
     week().days[+b.dataset.clear].locks = {}; persist(); render(); })));
   v.querySelectorAll('[data-ev]').forEach((b) => (b.onclick = () => editEvent(plans[+b.dataset.day], b.dataset.pid, b.dataset.ev, +b.dataset.day)));
@@ -233,12 +228,14 @@ function badMap(plan) {
   const set = new Set();
   for (const pool of new Set(plan.rows.map((r) => r.pool))) {
     const rs = plan.rows.filter((r) => r.pool === pool);
-    const lunchMax = plan.overflowMode === 'sarkmasin' && plan.pools[pool]?.needsChoice ? st.capacity.lunch + 1 : st.capacity.lunch;
+    const lunchMax = st.capacity.lunch;
+    const crowded = !!plan.pools[pool]?.crowded;
     for (let t = TL_START; t < TL_END; t += 15) {
       const inL = rs.filter((r) => r.lunch && r.lunch.start < t + 15 && t < r.lunch.end);
       const inB = rs.flatMap((r) => r.breaks.filter((b) => b.start < t + 15 && t < b.end).map((b) => [r, b]));
       if (inL.length > lunchMax) inL.forEach((r) => set.add(`${r.id}:${r.lunch.start}`));
-      if (inB.length > st.capacity.break || (inB.length && inL.length > st.capacity.lunch)) inB.forEach(([r, b]) => set.add(`${r.id}:${b.start}`));
+      const okDouble = crowded && inB.length === st.capacity.break + 1 && inL.length === 0;
+      if ((inB.length > st.capacity.break && !okDouble) || (inB.length && inL.length > st.capacity.lunch)) inB.forEach(([r, b]) => set.add(`${r.id}:${b.start}`));
     }
   }
   for (const r of plan.rows) {
@@ -305,10 +302,10 @@ function editEvent(plan, pid, key, di) {
 /** Haftalık satırın özeti: en çok kullanılan vardiya + izinli günler. */
 function weekSummary(arr) {
   const cnt = {};
-  arr.forEach((v) => { if (v !== 'OFF') cnt[v] = (cnt[v] || 0) + 1; });
+  arr.forEach((v) => { if (!isOff(v)) cnt[v] = (cnt[v] || 0) + 1; });
   const keys = Object.keys(cnt);
   const main = keys.sort((a, b) => cnt[b] - cnt[a])[0] || 'O';
-  return { main, mixed: keys.length > 1, off: arr.map((v, d) => (v === 'OFF' ? d : -1)).filter((d) => d >= 0) };
+  return { main, mixed: keys.length > 1, off: arr.map((v, d) => (isOff(v) ? d : -1)).filter((d) => d >= 0) };
 }
 
 function renderVardiya() {
@@ -316,9 +313,9 @@ function renderVardiya() {
   const st = state.settings;
   const SH = [['S', st.shifts.S], ['O', st.shifts.O], ['A', st.shifts.A]];
   const opts = (v) => SH.map(([k, s]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${s.start}–${s.end}</option>`).join('') +
-    `<option value="OFF" ${v === 'OFF' ? 'selected' : ''}>OFF</option>`;
+    Object.entries(NONWORK).map(([k, n]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${n}</option>`).join('');
   const gopts = (g) => st.groups.map((x) => `<option ${x === g ? 'selected' : ''}>${esc(x)}</option>`).join('');
-  const cards = state.people.map((p) => {
+  const cards = active().map((p) => {
     const sm = weekSummary(w.shifts[p.id]);
     const allOff = sm.off.length === 7;
     return `<div class="wk ${p.included ? '' : 'excluded'}">
@@ -334,7 +331,7 @@ function renderVardiya() {
         ${sm.mixed ? '<span class="muted">bazı günler farklı saatte</span>' : ''}
       </div>
       <div class="wk-off"><span class="muted">İzin:</span>
-        ${DAY_NAMES.map((n, d) => `<button class="offc ${w.shifts[p.id][d] === 'OFF' ? 'on' : ''}" data-off="${p.id}" data-d="${d}">${n}</button>`).join('')}
+        ${DAY_NAMES.map((n, d) => { const v = w.shifts[p.id][d]; return `<button class="offc ${isOff(v) ? 'on off-' + (v || 'OFF') : ''}" title="${isOff(v) ? NONWORK[v || 'OFF'] : 'Çalışıyor'}" data-off="${p.id}" data-d="${d}">${n}</button>`; }).join('')}
       </div>
       <div class="wk-bot">
         <label class="switch"><input type="checkbox" data-inc="${p.id}" ${p.included ? 'checked' : ''}> Mola planına dahil</label>
@@ -343,7 +340,7 @@ function renderVardiya() {
     </div>`;
   }).join('');
   const head = DAY_NAMES.map((n, d) => `<th>${n}<br><small>${dayShort(d)}</small></th>`).join('');
-  const rows = state.people.map((p) => `<tr class="${p.included ? '' : 'excluded'}"><td class="name">${esc(p.label)} <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span></td>
+  const rows = active().map((p) => `<tr class="${p.included ? '' : 'excluded'}"><td class="name">${esc(p.label)} <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span></td>
     ${w.shifts[p.id].map((v, d) => `<td><select class="sh sh-${v}" data-pid="${p.id}" data-d="${d}">${opts(v)}</select></td>`).join('')}</tr>`).join('');
   $('#view').innerHTML = `
     <div class="card"><h2>Kadro · haftalık vardiya</h2>
@@ -358,10 +355,15 @@ function renderVardiya() {
       </div></div>
     <div class="wk-list">${cards}</div>
     <div class="row" style="margin:12px 0"><button class="btn primary" id="toPlan">✔ Mola planını gör</button></div>
-    <details class="card"><summary><b>Gün gün tablo</b> <span class="muted">— bir gün farklı saatte çalışan varsa buradan değiştir</span></summary>
+    <details class="card"><summary><b>Haftalık vardiya planı</b> <span class="muted">— gün gün saat, OFF, Resmi tatil, İzinli</span></summary>
       <div class="tbl-wrap" style="margin-top:8px"><table class="grid"><thead><tr><th>Kişi</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
       <div class="row" style="margin-top:8px"><button class="btn small danger" id="clearWeek">Haftayı OFF yap</button></div>
-    </details>`;
+    </details>
+    ${state.people.some((p) => p.deleted) ? `<div class="card"><h2>Silinen kişiler</h2>
+      <p class="muted" style="margin:0 0 8px">Yanlışlıkla sildiysen geri ekle. İşten ayrılan kişiyi "Tamamen kaldır" ile sil.</p>
+      ${state.people.filter((p) => p.deleted).map((p) => `<div class="row del-row"><b>${esc(p.label || 'İsimsiz')}</b> <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span>
+        <span style="flex:1"></span><button class="btn small" data-restore="${p.id}">↩ Geri ekle</button>
+        <button class="btn small danger" data-purge="${p.id}">Tamamen kaldır</button></div>`).join('')}</div>` : ''}`;
   const v = $('#view');
   const rerender = () => { const y = window.scrollY; const open = v.querySelector('details')?.open; persist(); render(); if (open) v.querySelector('details').open = true; window.scrollTo(0, y); };
   $('#wkDate').onchange = (e) => {
@@ -378,15 +380,15 @@ function renderVardiya() {
   v.querySelectorAll('[data-shift]').forEach((el) => (el.onchange = () => {
     if (!el.value) return;
     const arr = w.shifts[el.dataset.shift];
-    const allOff = arr.every((x) => x === 'OFF');
-    for (let d = 0; d < 7; d++) if (allOff || arr[d] !== 'OFF') arr[d] = el.value;
+    const allOff = arr.every(isOff);
+    for (let d = 0; d < 7; d++) if (allOff || !isOff(arr[d])) arr[d] = el.value;
     rerender();
   }));
   v.querySelectorAll('[data-off]').forEach((el) => (el.onclick = () => {
     const arr = w.shifts[el.dataset.off], d = +el.dataset.d;
-    if (arr[d] === 'OFF') arr[d] = weekSummary(arr).main;
+    if (isOff(arr[d])) arr[d] = weekSummary(arr).main;
     else {
-      if (arr.filter((x) => x === 'OFF').length >= 2) toast("Not: bu kişinin 2'den fazla izin günü oldu");
+      if (arr.filter(isOff).length >= 2) toast("Not: bu kişinin 2'den fazla izin günü oldu");
       arr[d] = 'OFF';
     }
     rerender();
@@ -399,7 +401,15 @@ function renderVardiya() {
   }));
   v.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => {
     const p = state.people.find((x) => x.id === b.dataset.del);
-    confirmBox(`${p.label || 'Bu kişi'} kadrodan silinsin mi?`, 'Sil', () => {
+    p.deleted = true; rerender();
+    toast(`${p.label || 'Kişi'} silindi`, 'Geri al', () => { p.deleted = false; rerender(); });
+  }));
+  v.querySelectorAll('[data-restore]').forEach((b) => (b.onclick = () => {
+    const p = state.people.find((x) => x.id === b.dataset.restore); p.deleted = false; rerender(); toast(`${p.label} geri eklendi`);
+  }));
+  v.querySelectorAll('[data-purge]').forEach((b) => (b.onclick = () => {
+    const p = state.people.find((x) => x.id === b.dataset.purge);
+    confirmBox(`${p.label || 'Bu kişi'} tamamen kaldırılsın mı? Geçmiş haftalardaki vardiyaları da silinir, geri alınamaz.`, 'Tamamen kaldır', () => {
       state.people = state.people.filter((x) => x.id !== p.id);
       for (const wk of Object.values(state.weeks)) { delete wk.shifts[p.id]; wk.days.forEach((d) => delete d.locks[p.id]); }
       persist(); render();
@@ -448,10 +458,8 @@ function renderAyarlar() {
       ${num('capacity.break', 'Aynı anda molada (havuz başı)', st.capacity.break)}
       ${num('capacity.lunch', 'Aynı anda yemekte (havuz başı)', st.capacity.lunch)}
       ${num('minGap', 'Kişinin molaları arası en az (dk)', st.minGap, 15)}
-      ${num('maxGap', 'En uzun molasız çalışma (dk)', st.maxGap ?? 150, 15)}
-      <div class="field"><label>10'dan fazla kişide varsayılan</label><select data-path="defaultOverflow">
-        <option value="sarksin" ${st.defaultOverflow === 'sarksin' ? 'selected' : ''}>Sarksın</option>
-        <option value="sarkmasin" ${st.defaultOverflow === 'sarkmasin' ? 'selected' : ''}>Sarkmasın</option></select></div>
+      ${num('maxGap', 'En uzun molasız çalışma (dk)', st.maxGap ?? 165, 15)}
+${time('latestEnd', 'Tüm molalar en geç bitiş', st.latestEnd || '18:30')}
     </div></div>
     <div class="card form"><h2>Havuzlar</h2>
       <p class="muted" style="margin:0">Aynı havuzdakiler aynı anda molaya/yemeğe çıkamaz. Farklı havuzlar birbirini etkilemez.</p>

@@ -10,15 +10,18 @@ export const DEFAULT_SETTINGS = {
   breakCount: 3,          // kişi başı kısa mola sayısı
   breakMin: 15,           // kısa mola süresi
   lunchMin: 30,           // yemek süresi
-  lunchWindow: { start: '11:00', end: '16:00' },
+  lunchWindow: { start: '11:00', end: '16:00' }, // yemekler 11:00'de başlar, mümkünse 16:00'da biter (sığmazsa sarkar)
+  latestEnd: '18:30',     // yemek dahil TÜM molalar en geç bu saatte bitmiş olur
   capacity: { break: 1, lunch: 1 }, // havuz başına aynı anda
-  maxGap: 150,           // en uzun molasız çalışma (vardiya başı/sonu dahil) — kesin kural
+  maxGap: 165,           // en uzun molasız çalışma (vardiya başı/sonu dahil) — kesin kural
   minGap: 60,             // kişinin kendi molaları (yemek dahil) arası EN AZ boşluk — kesin kural
   groups: ['B2B', 'B2C', 'Mail', 'Satış'],
   groupPool: { B2B: 1, B2C: 1, 'Satış': 1, Mail: 2 },
   poolNames: { 1: 'B2B + B2C', 2: 'Mail' },
-  defaultOverflow: 'sarksin', // 'sarksin' | 'sarkmasin'
 };
+
+// Çalışılmayan gün türleri (vardiya planında seçilir)
+export const NONWORK = { OFF: 'OFF', RT: 'Resmi tatil', IZ: 'İzinli' };
 
 export const DAY_NAMES = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 
