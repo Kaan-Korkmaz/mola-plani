@@ -120,105 +120,223 @@ function planPool(rs, st, mode, locks, issues) {
   const blocked = (t) => lunchOcc(t, t + Q) > capL;
 
   // --- Kısa molalar ---
-  const items = [];
+  // Kurallar: kişinin olayları (yemek dahil) arası en az G dk, en fazla MAXG dk molasız çalışma
+  // (vardiya başı → ilk mola ve son mola → vardiya sonu dahil). Havuzda aynı anda capB kişi molada.
+  // Yöntem: her kişi için kurallara uyan tüm mola kombinasyonları çıkarılır; havuzda çakışmayacak
+  // şekilde kişiler birkaç farklı sırayla yerleştirilir, en iyi sonuç seçilir.
+  const G = st.minGap;
+  const MAXG = st.maxGap ?? 150;
+  const people = [];
   for (const r of rs) {
     const lk = locks[r.id] || {};
-    const { targets: tg, before } = breakTargets(r, st);
-    for (let k = 0; k < st.breakCount; k++) {
-      const key = `b${k}`;
+    const allKeys = Array.from({ length: st.breakCount }, (_, k) => `b${k}`);
+    for (const key of allKeys)
       if (lk[key] != null) r.breaks.push({ start: lk[key], end: lk[key] + B, key, locked: true });
-      else items.push({ r, key, target: tg[k], pre: !!r.lunch && k < before });
+    const freeKeys = allKeys.filter((k) => lk[k] == null);
+    const fixed = [...(r.lunch ? [r.lunch] : []), ...r.breaks].sort((a, b) => a.start - b.start);
+    const pts = [{ start: r.shiftStart, end: r.shiftStart, shift: true }, ...fixed, { start: r.shiftEnd, end: r.shiftEnd, shift: true }];
+    const segs = [];
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const A = pts[i], Z = pts[i + 1];
+      const a = A.end, z = Z.start, len = z - a;
+      const gA = A.shift ? st.edgeMin : G, gZ = Z.shift ? st.edgeMin : G;
+      const need = Math.max(0, Math.ceil((len - MAXG) / (MAXG + B)));
+      const cap = len >= gA + B + gZ ? Math.floor((len - gA - gZ + G) / (B + G)) : 0;
+      segs.push({ a, z, gA, gZ, len, need, cap, m: 0, preLunch: Z === r.lunch });
     }
+    let free = freeKeys.length;
+    for (const s of segs) { s.m = Math.min(s.need, s.cap); free -= s.m; }
+    if (free < 0) {
+      issues.push({ level: 'error', personId: r.id, text: `${r.label}: ${MAXG / 60} saat kuralı için ${st.breakCount} mola yetmiyor` });
+      for (let i = segs.length - 1; i >= 0 && free < 0; i--) { const cut = Math.min(segs[i].m, -free); segs[i].m -= cut; free += cut; }
+    }
+    while (free > 0) {
+      const open = segs.filter((s) => s.m < s.cap);
+      if (!open.length) break;
+      const pre = open.find((s) => s.preLunch && s.m < st.breakCount - 1);
+      const pick = pre || open.sort((x, y) => y.len / (y.m + 1) - x.len / (x.m + 1))[0];
+      pick.m++; free--;
+    }
+    if (free > 0) issues.push({ level: 'error', personId: r.id, text: `${r.label}: ${free} mola için kurallara uygun boşluk yok — elle yerleştirilemedi` });
+    // Tercih edilen dağılım (yemekten önce 2 mola) + diğer geçerli dağılımlar (küçük cezayla)
+    const pref = segs.map((s) => s.m);
+    const total = pref.reduce((a, b) => a + b, 0);
+    const allocs = [];
+    const recA = (i, left, cur) => {
+      if (i === segs.length) { if (left === 0) allocs.push([...cur]); return; }
+      for (let m = Math.min(segs[i].need, pref[i]); m <= Math.min(segs[i].cap, left); m++) { cur.push(m); recA(i + 1, left - m, cur); cur.pop(); }
+    };
+    recA(0, total, []);
+    let combos = [];
+    for (const al of allocs) {
+      const pen = al.reduce((s, m, i) => s + Math.abs(m - pref[i]), 0) * 45;
+      const sg = segs.map((s, i) => ({ ...s, m: al[i] }));
+      for (const c of combosFor(r, sg, st, G, MAXG, B)) combos.push({ xs: c.xs, cost: c.cost + pen });
+    }
+    combos.sort((a, b) => a.cost - b.cost);
+    if (combos.length > 3000) combos = combos.slice(0, 3000);
+    people.push({ r, segs, freeKeys, combos });
   }
-  // Önce yemekten önceki molalar (yemeği erken olan önce — en sıkışık olan), sonra diğerleri.
-  items.sort((a, b) => (b.pre - a.pre) || (a.pre ? a.r.lunch.start - b.r.lunch.start : 0) || a.target - b.target || a.r.order - b.r.order);
 
-  const breakOcc = (t, except) =>
-    rs.reduce((n, r) => n + r.breaks.filter((b) => b !== except && overlaps(b, { start: t, end: t + Q })).length, 0);
+  const blockedQ = new Set();
+  for (let t = 0; t < 24 * 60; t += Q) if (blocked(t)) blockedQ.add(t);
+  const lockedOcc = new Map();
+  for (const r of rs) for (const b of r.breaks) for (let t = b.start; t < b.end; t += Q) lockedOcc.set(t, (lockedOcc.get(t) || 0) + 1);
 
-  const feasible = (it, s, gap, ignoreOcc = false, except = null) => {
-    const r = it.r;
-    if (s < r.winStart || s + B > r.winEnd) return false;
-    const ev = { start: s, end: s + B };
-    const own = r.breaks.filter((b) => b !== except);
-    if (r.lunch && overlaps(ev, r.lunch)) return false;
-    if (own.some((b) => overlaps(ev, b))) return false;
-    if (!farEnough(ev, [...(r.lunch ? [r.lunch] : []), ...own], gap)) return false;
-    for (let t = s; t < s + B; t += Q) {
-      if (blocked(t)) return false;
-      if (!ignoreOcc && breakOcc(t, except) >= capB) return false;
+  const run = (order) => {
+    const occ = new Map(lockedOcc);
+    const chosen = new Map();
+    let fails = 0, cost = 0;
+    for (const p of order) {
+      if (!p.combos.length) { if (p.segs.some((s) => s.m)) fails++; chosen.set(p, []); continue; }
+      const c = p.combos.find((cb) => cb.xs.every((x) => !blockedQ.has(x) && (occ.get(x) || 0) < capB));
+      if (!c) { fails++; chosen.set(p, null); continue; }
+      for (const x of c.xs) occ.set(x, (occ.get(x) || 0) + 1);
+      chosen.set(p, c.xs); cost += c.cost;
     }
-    return true;
+    return { chosen, fails, cost, occ };
   };
 
-  const candidates = (it) => {
-    const out = [];
-    for (let s = it.r.winStart; s + B <= it.r.winEnd; s += Q) out.push(s);
-    return out.sort((a, b) => Math.abs(a - it.target) - Math.abs(b - it.target) || a - b);
-  };
-
-  const passes = [];
-  const G = st.minGap; // kesin alt sınır — asla altına inilmez
-  passes.push([G + 30, true], [G, true], [G + 30, false], [G, false]);
-
-  let pending = items;
-  for (const [gap, keepSide] of passes) {
-    const next = [];
-    for (const it of pending) {
-      const side = (c) => !keepSide || !it.r.lunch || (it.pre ? c + B <= it.r.lunch.start : c >= it.r.lunch.end);
-      const s = candidates(it).find((c) => side(c) && feasible(it, c, gap));
-      if (s != null) it.r.breaks.push({ start: s, end: s + B, key: it.key, locked: false });
-      else next.push(it);
-    }
-    pending = next;
-    if (!pending.length) break;
+  // Denenecek sıralar: en kısıtlı önce, yemeği erken olan önce, vardiyaya göre + sabit tohumlu karışık sıralar
+  const orders = [
+    [...people].sort((a, b) => a.combos.length - b.combos.length || a.r.order - b.r.order),
+    [...people].sort((a, b) => (a.r.lunch?.start ?? 0) - (b.r.lunch?.start ?? 0) || a.r.order - b.r.order),
+    [...people].sort((a, b) => a.r.shiftStart - b.r.shiftStart || a.r.order - b.r.order),
+  ];
+  let seed = 12345;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (let k = 0; k < 60; k++) orders.push([...people].map((p) => [rnd(), p]).sort((a, b) => a[0] - b[0]).map((x) => x[1]));
+  let best = null;
+  for (const o of orders) {
+    const res = run(o);
+    if (!best || res.fails < best.fails || (res.fails === best.fails && res.cost < best.cost)) best = res;
+    if (best.fails === 0 && o === orders[2]) break; // ilk üç sıradan biri tam çözdüyse yeter
   }
 
-  // 1 adımlık takas: dolu bir çeyreği boşaltmak için oradaki molayı başka yere kaydır
-  for (const it of pending) {
-    let done = false;
-    for (const s of candidates(it)) {
-      if (!feasible(it, s, G, true)) continue;
-      const blockers = rs.flatMap((r) => r.breaks.filter((b) => !b.locked && overlaps(b, { start: s, end: s + B })).map((b) => ({ r, b })));
-      if (blockers.length !== 1) continue;
-      const { r: br, b } = blockers[0];
-      const bit = { r: br, key: b.key, target: b.start };
-      const bIdx = br.breaks.indexOf(b);
-      br.breaks.splice(bIdx, 1);
-      it.r.breaks.push({ start: s, end: s + B, key: it.key, locked: false });
-      const alt = candidates(bit).find((c) => feasible(bit, c, G));
-      if (alt != null) {
-        br.breaks.push({ start: alt, end: alt + B, key: b.key, locked: false });
-        done = true;
+  // Tam arama: hızlı denemeler herkesi yerleştiremediyse, en kısıtlı kişiden başlayarak geri izlemeli ara
+  if (best.fails > 0) {
+    const need = people.filter((p) => p.combos.length);
+    const occ = new Map(lockedOcc);
+    const pick = new Map();
+    let nodes = 0, found = false;
+    const fitsNow = (xs) => xs.every((x) => !blockedQ.has(x) && (occ.get(x) || 0) < capB);
+    const dfs = () => {
+      if (++nodes > 20000) return false;
+      let bestP = null, bestList = null;
+      for (const p of need) {
+        if (pick.has(p)) continue;
+        const list = [];
+        for (const c of p.combos) { if (fitsNow(c.xs)) { list.push(c); if (bestList && list.length >= bestList.length) break; } }
+        if (!list.length) return false;
+        if (!bestList || list.length < bestList.length) { bestP = p; bestList = list; }
+      }
+      if (!bestP) return true;
+      for (const c of bestList) {
+        c.xs.forEach((x) => occ.set(x, (occ.get(x) || 0) + 1));
+        pick.set(bestP, c);
+        if (dfs()) return true;
+        pick.delete(bestP);
+        c.xs.forEach((x) => occ.set(x, occ.get(x) - 1));
+        if (nodes > 20000) return false;
+      }
+      return false;
+    };
+    found = dfs();
+    if (found) {
+      best = { chosen: new Map(people.map((p) => [p, pick.get(p)?.xs ?? []])), fails: 0, cost: 0, occ };
+    }
+  }
+
+  // Onarım: açıkta kalan kişiye yer aç — çakıştığı en fazla 2 kişiyi başka kombinasyonlarına kaydır
+  const fits = (xs, occ) => xs.every((x) => !blockedQ.has(x) && (occ.get(x) || 0) < capB);
+  const add = (xs, occ, d) => xs.forEach((x) => occ.set(x, (occ.get(x) || 0) + d));
+  for (let round = 0; round < 3; round++) {
+    let improved = false;
+    for (const p of people) {
+      if (best.chosen.get(p) !== null) continue;
+      const owner = new Map();
+      for (const [q, xs] of best.chosen) if (xs && q !== p) xs.forEach((x) => owner.set(x, q));
+      for (const c of p.combos.slice(0, 400)) {
+        if (c.xs.some((x) => blockedQ.has(x))) continue;
+        const victims = [...new Set(c.xs.filter((x) => (best.occ.get(x) || 0) >= capB).map((x) => owner.get(x)))];
+        if (!victims.length || victims.length > 2 || victims.some((v) => !v)) continue;
+        const occ = new Map(best.occ);
+        victims.forEach((v) => add(best.chosen.get(v), occ, -1));
+        if (!fits(c.xs, occ)) continue;
+        add(c.xs, occ, 1);
+        const moved = [];
+        for (const v of victims) {
+          const alt = v.combos.find((cb) => fits(cb.xs, occ));
+          if (!alt) break;
+          add(alt.xs, occ, 1); moved.push([v, alt]);
+        }
+        if (moved.length !== victims.length) continue;
+        best.occ = occ;
+        best.chosen.set(p, c.xs);
+        moved.forEach(([v, alt]) => best.chosen.set(v, alt.xs));
+        improved = true;
         break;
       }
-      it.r.breaks.pop();
-      br.breaks.splice(bIdx, 0, b);
     }
-    if (!done) issues.push({ level: 'error', personId: it.r.id, text: `${it.r.label}: ${Number(it.key.slice(1)) + 1}. mola yerleştirilemedi — elle yerleştirin` });
+    if (!improved) break;
   }
 
-  for (const r of rs) r.breaks.sort((a, b) => a.start - b.start);
+  for (const p of people) {
+    const xs = best.chosen.get(p);
+    if (xs) { for (const x of xs) p.r.breaks.push({ start: x, end: x + B, key: null, locked: false }); continue; }
+    // Tam çözüm yoksa: kurallara uyan kombinasyonlardan boş yerlere en çok oturanı, kalanını hata olarak yaz
+    let bestPart = [];
+    for (const c of p.combos) {
+      const ok = c.xs.filter((x) => !blockedQ.has(x) && (best.occ.get(x) || 0) < capB);
+      if (ok.length > bestPart.length) bestPart = ok;
+      if (bestPart.length === c.xs.length - 1) break;
+    }
+    for (const x of bestPart) { p.r.breaks.push({ start: x, end: x + B, key: null, locked: false }); best.occ.set(x, (best.occ.get(x) || 0) + 1); }
+    const miss = p.segs.reduce((n, s) => n + s.m, 0) - bestPart.length;
+    if (miss > 0) issues.push({ level: 'error', personId: p.r.id, text: `${p.r.label}: ${miss} mola kurallara uygun yere yerleştirilemedi — elle yerleştirin` });
+  }
+
+  // Otomatik molalara anahtar ver: saate göre sırayla (kilitliler kendi anahtarını korur)
+  for (const p of people) {
+    p.r.breaks.sort((a, b) => a.start - b.start);
+    const keys = [...p.freeKeys];
+    for (const b of p.r.breaks) if (!b.locked) b.key = keys.shift();
+  }
   return { count: n, needsChoice, capacity: normal };
 }
 
-/** Molaları kişinin penceresine, yemeğin önü ve arkasına orantılı yayar. */
-function breakTargets(r, st) {
-  const B = st.breakMin, k = st.breakCount;
-  if (!r.lunch) {
-    const span = r.winEnd - B - r.winStart;
-    return { targets: Array.from({ length: k }, (_, i) => roundQ(r.winStart + (span * (i + 1)) / (k + 1))), before: 0 };
+/** Bir kişinin kurallara uyan mola kombinasyonları (maliyete göre sıralı). */
+function combosFor(r, segs, st, G, MAXG, B) {
+  const perSeg = segs.map((s) => {
+    if (!s.m) return [{ xs: [], cost: 0 }];
+    const lo = Math.max(s.a + s.gA, r.winStart), hi = Math.min(s.z - s.gZ - B, r.winEnd - B);
+    const targets = Array.from({ length: s.m }, (_, i) => roundQ(lo + ((hi - lo) * (i + 1)) / (s.m + 1)));
+    const out = [];
+    const rec = (i, prevEnd, xs, cost) => {
+      if (out.length > 4000) return;
+      if (i === s.m) {
+        const tail = s.z - prevEnd;
+        if (tail >= s.gZ && tail <= MAXG) out.push({ xs: [...xs], cost });
+        return;
+      }
+      const minGap = i === 0 ? s.gA : G;
+      for (let x = Math.max(lo, prevEnd + minGap); x <= Math.min(hi, prevEnd + MAXG); x += Q) {
+        // kalan molalar için yer kalmalı
+        const left = s.m - i - 1;
+        if (x + B + left * (G + B) + s.gZ > s.z) break;
+        xs.push(x); rec(i + 1, x + B, xs, cost + Math.abs(x - targets[i])); xs.pop();
+      }
+    };
+    rec(0, s.a, [], 0);
+    return out;
+  });
+  let combos = [{ xs: [], cost: 0 }];
+  for (const list of perSeg) {
+    const next = [];
+    for (const c of combos) for (const l of list) next.push({ xs: [...c.xs, ...l.xs], cost: c.cost + l.cost });
+    combos = next.length > 20000 ? next.sort((a, b) => a.cost - b.cost).slice(0, 20000) : next;
   }
-  const seg1 = [r.winStart, r.lunch.start - B];
-  const seg2 = [r.lunch.end, r.winEnd - B];
-  const len1 = Math.max(0, seg1[1] - seg1[0]), len2 = Math.max(0, seg2[1] - seg2[0]);
-  // Tercih: son mola hariç hepsi yemekten önce (tablo sırası: 1. Mola, 2. Mola, Yemek, 3. Mola).
-  // Yemekten önce yeterli yer yoksa sığdığı kadar.
-  let n1 = Math.min(k - 1, Math.floor((len1 + B) / (B + st.minGap)));
-  if (len2 < B) n1 = k;
-  n1 = Math.max(0, n1);
-  const spread = ([a, b], m) => Array.from({ length: m }, (_, i) => roundQ(a + ((b - a) * (i + 1)) / (m + 1)));
-  return { targets: [...spread(seg1, n1), ...spread(seg2, k - n1)], before: n1 };
+  return combos.filter((c) => c.xs.length).sort((a, b) => a.cost - b.cost);
 }
 
 /** Plan üzerindeki kural ihlallerini listeler (elle değişiklikten sonra da kullanılır). */
@@ -231,6 +349,15 @@ export function validateDay(plan, st) {
     for (const e of evs) {
       if (e.start < r.winStart || e.end > r.winEnd)
         out.push({ level: 'error', personId: r.id, text: `${r.label}: ${e.name} ${fmt(e.start)} vardiyanın ilk/son ${st.edgeMin} dakikasına denk geliyor` });
+    }
+    const MAXG = st.maxGap ?? 150;
+    const dur = (m) => (m % 60 ? `${Math.floor(m / 60)} sa ${m % 60} dk` : `${m / 60} saat`);
+    const seq = [...evs].sort((a, b) => a.start - b.start);
+    let prevEnd = r.shiftStart;
+    for (const e of [...seq, { start: r.shiftEnd, end: r.shiftEnd }]) {
+      if (e.start - prevEnd > MAXG)
+        out.push({ level: 'error', personId: r.id, text: `${r.label}: ${fmt(prevEnd)}–${fmt(e.start)} arası ${dur(e.start - prevEnd)} molasız (en fazla ${dur(MAXG)})` });
+      prevEnd = Math.max(prevEnd, e.end);
     }
     for (let i = 0; i < evs.length; i++)
       for (let j = i + 1; j < evs.length; j++)

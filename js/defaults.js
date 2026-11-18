@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   lunchMin: 30,           // yemek süresi
   lunchWindow: { start: '11:00', end: '16:00' },
   capacity: { break: 1, lunch: 1 }, // havuz başına aynı anda
+  maxGap: 150,           // en uzun molasız çalışma (vardiya başı/sonu dahil) — kesin kural
   minGap: 60,             // kişinin kendi molaları (yemek dahil) arası EN AZ boşluk — kesin kural
   groups: ['B2B', 'B2C', 'Mail', 'Satış'],
   groupPool: { B2B: 1, B2C: 1, 'Satış': 1, Mail: 2 },

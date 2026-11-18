@@ -285,6 +285,15 @@ function editEvent(plan, pid, key, di) {
     m.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => {
       day.locks[pid] ||= {};
       day.locks[pid][key] = +b.dataset.s;
+      // Molaları saate göre yeniden numarala: en erken mola 1., sonra 2., 3. (kilitli olanlar dahil)
+      if (!isLunch) {
+        const row = planFor(di).rows.find((x) => x.id === pid);
+        if (row) {
+          const fresh = day.locks[pid].lunch != null ? { lunch: day.locks[pid].lunch } : {};
+          [...row.breaks].sort((a, c) => a.start - c.start).forEach((br, i) => { if (br.locked) fresh[`b${i}`] = br.start; });
+          day.locks[pid] = fresh;
+        }
+      }
       persist(); closeModal(); render();
       const mine = planFor(di).issues.filter((x) => x.level === 'error' && (x.personIds || [x.personId]).includes(pid));
       toast(mine.length ? `⛔ ${mine[0].text}` : `${r.label}: ${isLunch ? 'yemek' : 'mola'} ${fmt(+b.dataset.s)} 🔒 — çakışma yok`);
@@ -439,6 +448,7 @@ function renderAyarlar() {
       ${num('capacity.break', 'Aynı anda molada (havuz başı)', st.capacity.break)}
       ${num('capacity.lunch', 'Aynı anda yemekte (havuz başı)', st.capacity.lunch)}
       ${num('minGap', 'Kişinin molaları arası en az (dk)', st.minGap, 15)}
+      ${num('maxGap', 'En uzun molasız çalışma (dk)', st.maxGap ?? 150, 15)}
       <div class="field"><label>10'dan fazla kişide varsayılan</label><select data-path="defaultOverflow">
         <option value="sarksin" ${st.defaultOverflow === 'sarksin' ? 'selected' : ''}>Sarksın</option>
         <option value="sarkmasin" ${st.defaultOverflow === 'sarkmasin' ? 'selected' : ''}>Sarkmasın</option></select></div>
