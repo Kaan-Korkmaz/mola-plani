@@ -106,11 +106,14 @@ function daySection(i, view) {
     <div class="card">
       <h2 style="margin:0">${dayTitle(i)}</h2>
       <div class="pools" style="margin-top:8px">${pools || '<span class="muted">Bu gün çalışan yok.</span>'}</div>
-      ${plan.rows.length ? issuesHtml : ''}
+      ${plan.rows.length ? (errors.length
+        ? `<div class="sum-bad">⛔ ${errors.length} sorun var — ayrıntılar tablonun altında</div>`
+        : `<div class="ok-line">✔ Tüm kurallar sağlanıyor</div>`) : ''}
       ${overflow}
       ${lockCount ? `<div class="row" style="margin-top:8px"><button class="btn small" data-clear="${i}">Elle değişiklikleri sil (${lockCount})</button></div>` : ''}
     </div>
     ${body}
+    ${plan.rows.length && (errors.length || warns.length) ? `<div class="notes"><b>Notlar · ${DAY_NAMES[i]}</b>${issuesHtml}</div>` : ''}
     </section>` };
 }
 
@@ -283,7 +286,8 @@ function editEvent(plan, pid, key, di) {
       day.locks[pid] ||= {};
       day.locks[pid][key] = +b.dataset.s;
       persist(); closeModal(); render();
-      toast(`${r.label}: ${isLunch ? 'yemek' : 'mola'} ${fmt(+b.dataset.s)} 🔒`);
+      const mine = planFor(di).issues.filter((x) => x.level === 'error' && (x.personIds || [x.personId]).includes(pid));
+      toast(mine.length ? `⛔ ${mine[0].text}` : `${r.label}: ${isLunch ? 'yemek' : 'mola'} ${fmt(+b.dataset.s)} 🔒 — çakışma yok`);
     }));
   });
 }

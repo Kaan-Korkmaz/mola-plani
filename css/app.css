@@ -214,3 +214,7 @@ details > summary { cursor: pointer; }
 
 table.plan td.c-group { color: #fff; font-weight: 800; font-size: 13px; letter-spacing: .3px; }
 table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
+
+.notes { background: #fff; border: 2px solid #fca5a5; border-radius: 12px; padding: 10px 12px; margin: -4px 0 12px; }
+.notes .issues { margin-top: 6px; }
+.sum-bad { margin-top: 8px; color: var(--bad); font-weight: 700; }

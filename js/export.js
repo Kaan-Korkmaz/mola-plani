@@ -21,7 +21,7 @@ export function columns(st) {
 /** Bir günün planını tabloya çevirir (uygulama, Excel ve PNG aynı tabloyu kullanır). */
 export function dayTable(plan, st) {
   const cols = columns(st);
-  const badIds = new Set(plan.issues.filter((i) => i.level === 'error' && i.personId).map((i) => i.personId));
+  const badIds = new Set(plan.issues.filter((i) => i.level === 'error').flatMap((i) => i.personIds || (i.personId ? [i.personId] : [])));
   const warnIds = new Set(plan.issues.filter((i) => i.level === 'warn' && i.personId).map((i) => i.personId));
   const rows = [];
   // Sıra: B2B en üstte, sonra B2C, Mail, en altta Satış; grup içinde vardiya saatine göre.

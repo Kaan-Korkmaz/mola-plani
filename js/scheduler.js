@@ -248,16 +248,25 @@ export function validateDay(plan, st) {
     const rs = plan.rows.filter((r) => r.pool === pool);
     const lunchMax = plan.overflowMode === 'sarkmasin' && plan.pools[pool]?.needsChoice ? capL + 1 : capL;
     const name = st.poolNames[pool] || `Havuz ${pool}`;
+    // Çakışmaları kişi kişi yaz: "A (mola 10:30) ↔ B (mola 10:30) çakışıyor"
+    const pairs = (list, kind) => {
+      for (let i = 0; i < list.length; i++)
+        for (let j = i + 1; j < list.length; j++) {
+          const [ra, ea] = list[i], [rb, eb] = list[j];
+          out.push({ level: 'error', conflict: true, personIds: [ra.id, rb.id], personId: ra.id,
+            text: `${ra.label} (${kind} ${fmt(ea.start)}) ↔ ${rb.label} (${kind} ${fmt(eb.start)}) çakışıyor` });
+        }
+    };
     for (let t = 0; t < 24 * 60; t += Q) {
       const q = { start: t, end: t + Q };
-      const inL = rs.filter((r) => r.lunch && overlaps(r.lunch, q));
-      const inB = rs.filter((r) => r.breaks.some((b) => overlaps(b, q)));
-      if (inL.length > lunchMax)
-        out.push({ level: 'error', text: `${name}: ${fmt(t)}'de aynı anda ${inL.length} kişi yemekte (${inL.map((r) => r.label).join(', ')})` });
-      if (inB.length > capB)
-        out.push({ level: 'error', text: `${name}: ${fmt(t)}'de aynı anda ${inB.length} kişi molada (${inB.map((r) => r.label).join(', ')})` });
+      const inL = rs.filter((r) => r.lunch && overlaps(r.lunch, q)).map((r) => [r, r.lunch]);
+      const inB = rs.flatMap((r) => r.breaks.filter((b) => overlaps(b, q)).map((b) => [r, b]));
+      if (inL.length > lunchMax) pairs(inL, 'yemek');
+      if (inB.length > capB) pairs(inB, 'mola');
       if (inL.length > capL && inB.length)
-        out.push({ level: 'error', text: `${name}: ${fmt(t)}'de 2 kişi yemekteyken mola verilmiş (${inB.map((r) => r.label).join(', ')})` });
+        for (const [r, b] of inB)
+          out.push({ level: 'error', conflict: true, personIds: [r.id, ...inL.map(([x]) => x.id)], personId: r.id,
+            text: `${r.label} (mola ${fmt(b.start)}) — o sırada 2 kişi yemekte: ${inL.map(([x]) => x.label).join(', ')}` });
     }
     const over = rs.filter((r) => r.lunch && r.lunch.end > lw1);
     if (over.length)
