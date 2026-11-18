@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS = {
   lunchWindow: { start: '11:00', end: '16:00' },
   capacity: { break: 1, lunch: 1 }, // havuz başına aynı anda
   minGap: 60,             // kişinin kendi molaları arası hedef boşluk (sığmazsa azalır)
-  groups: ['B2B', 'B2C', 'Satış', 'Mail'],
+  groups: ['B2B', 'B2C', 'Mail', 'Satış'],
   groupPool: { B2B: 1, B2C: 1, 'Satış': 1, Mail: 2 },
   poolNames: { 1: 'B2B + B2C', 2: 'Mail' },
   defaultOverflow: 'sarksin', // 'sarksin' | 'sarkmasin'

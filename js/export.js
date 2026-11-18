@@ -1,13 +1,15 @@
 // Çıktılar: Excel (.xlsx, renkli) ve fotoğraf (PNG). İnternet gerekmez.
 import { fmt } from './scheduler.js';
 
+export const GROUP_ORDER = ['B2B', 'B2C', 'Mail', 'Satış'];
+export const GROUP_COLOR = { B2B: '7C3AED', B2C: '0891B2', Mail: '15803D', 'Satış': 'BE185D' };
 const range = (e) => `${fmt(e.start)}–${fmt(e.end)}`;
 
-/** Sütun düzeni: Vardiya | Kişi | Grup | 1. Mola | 2. Mola | Yemek | 3. Mola (yemek son molanın önünde). */
+/** Sütun düzeni: Operasyon | Vardiya | Kişi | 1. Mola | 2. Mola | Yemek | 3. Mola (yemek son molanın önünde). */
 export function columns(st) {
   const k = st.breakCount;
   const lunchAt = k >= 2 ? k - 1 : k; // kaçıncı moladan önce yemek
-  const cols = [{ t: 'shift', h: 'Vardiya' }, { t: 'name', h: 'Kişi' }, { t: 'group', h: 'Grup' }];
+  const cols = [{ t: 'group', h: 'Operasyon' }, { t: 'shift', h: 'Vardiya' }, { t: 'name', h: 'Kişi' }];
   for (let i = 0; i < k; i++) {
     if (i === lunchAt) cols.push({ t: 'lunch', h: 'Yemek' });
     cols.push({ t: 'break', i, h: `${i + 1}. Mola` });
@@ -19,25 +21,27 @@ export function columns(st) {
 /** Bir günün planını tabloya çevirir (uygulama, Excel ve PNG aynı tabloyu kullanır). */
 export function dayTable(plan, st) {
   const cols = columns(st);
-  const pools = [...new Set(plan.rows.map((r) => r.pool))].sort((a, b) => a - b);
   const badIds = new Set(plan.issues.filter((i) => i.level === 'error' && i.personId).map((i) => i.personId));
   const warnIds = new Set(plan.issues.filter((i) => i.level === 'warn' && i.personId).map((i) => i.personId));
   const rows = [];
-  for (const pool of pools) {
-    const rs = plan.rows.filter((r) => r.pool === pool).sort((a, b) => a.shiftStart - b.shiftStart || a.order - b.order);
-    rows.push({ poolHeader: st.poolNames[pool] || `Havuz ${pool}`, count: rs.length });
+  // Sıra: B2B en üstte, sonra B2C, Mail, en altta Satış; grup içinde vardiya saatine göre.
+  const rank = (g) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? GROUP_ORDER.length : i; };
+  const rs = [...plan.rows].sort((a, b) => rank(a.group) - rank(b.group) || a.shiftStart - b.shiftStart || a.order - b.order);
+  let prev = null;
+  {
     for (const r of rs) {
       const sh = st.shifts[r.shift];
       const br = [...r.breaks].sort((a, b) => a.start - b.start);
       const cells = cols.map((c) => {
         if (c.t === 'shift') return { text: `${sh.start}–${sh.end}`, shift: r.shift };
         if (c.t === 'name') return { text: r.label };
-        if (c.t === 'group') return { text: r.group };
+        if (c.t === 'group') return { text: r.group, group: r.group };
         if (c.t === 'lunch') return r.lunch ? { text: range(r.lunch), ev: r.lunch, key: 'lunch', over: r.lunch.overflow } : { text: '—', key: 'lunch' };
         const b = br[c.i];
         return b ? { text: range(b), ev: b, key: b.key } : { text: '—' };
       });
-      rows.push({ r, cells, over: !!r.lunch?.overflow, bad: badIds.has(r.id), warn: warnIds.has(r.id) });
+      rows.push({ r, cells, over: !!r.lunch?.overflow, bad: badIds.has(r.id), warn: warnIds.has(r.id), groupStart: prev !== null && prev !== r.group });
+      prev = r.group;
     }
   }
   return { cols, rows };
@@ -72,6 +76,7 @@ function sheetFor(plan, st, title) {
       let s = t2 === 'name' ? { font: { bold: true } } : { ...S_C };
       if (r.bad) s = { ...s, ...S_BAD };
       if (t2 === 'shift' && SH_FILL[c.shift]) s = { ...S_C, font: { bold: true }, fill: { fgColor: { rgb: SH_FILL[c.shift] } } };
+      if (t2 === 'group') s = { ...S_C, font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: GROUP_COLOR[c.group] || '6B7280' } } };
       if (c.over) s = S_OVER;
       set(R, ci, s);
     });
@@ -82,7 +87,7 @@ function sheetFor(plan, st, title) {
     merges.push({ s: { r: noteStart + i, c: 0 }, e: { r: noteStart + i, c: cols - 1 } });
   });
   ws['!merges'] = merges;
-  ws['!cols'] = cdef.map((c) => ({ wch: c.t === 'name' ? 20 : c.t === 'group' ? 8 : 14 }));
+  ws['!cols'] = cdef.map((c) => ({ wch: c.t === 'name' ? 22 : c.t === 'group' ? 11 : 14 }));
   return ws;
 }
 
@@ -101,7 +106,7 @@ export async function pngBlob(plan, st, title) {
   const { cols: cdef, rows: t } = dayTable(plan, st);
   const head = cdef.map((c) => c.h);
   const notes = plan.issues.map((i) => ({ bad: i.level === 'error', text: i.text }));
-  const colW = cdef.map((c) => (c.t === 'name' ? 170 : c.t === 'group' ? 70 : c.t === 'shift' ? 130 : 115));
+  const colW = cdef.map((c) => (c.t === 'name' ? 180 : c.t === 'group' ? 100 : c.t === 'shift' ? 130 : 115));
   const W = colW.reduce((a, b) => a + b, 0) + 40;
   const rowH = 34, top = 76;
   const H = top + rowH * (t.length + 1) + (notes.length ? 20 + notes.length * 22 : 0) + 30;
@@ -138,12 +143,14 @@ export async function pngBlob(plan, st, title) {
       r.cells.forEach((c, i) => {
         const t2 = cdef[i].t;
         if (t2 === 'shift' && shFill[c.shift]) { g.fillStyle = shFill[c.shift]; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
+        if (t2 === 'group') { g.fillStyle = '#' + (GROUP_COLOR[c.group] || '6B7280'); g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
         if (c.over) { g.fillStyle = '#dc2626'; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
-        const color = c.over ? '#fff' : r.bad && t2 === 'name' ? '#b91c1c' : '#111827';
-        cellText(c.text, x, y, colW[i], color, t2 === 'name' || t2 === 'shift' || !!c.over, t2 === 'name' ? 'left' : 'center');
+        const color = c.over || t2 === 'group' ? '#fff' : r.bad && t2 === 'name' ? '#b91c1c' : '#111827';
+        cellText(c.text, x, y, colW[i], color, t2 === 'name' || t2 === 'shift' || t2 === 'group' || !!c.over, t2 === 'name' ? 'left' : 'center');
         x += colW[i];
       });
     }
+    if (r.groupStart) { g.fillStyle = '#1e3a8a'; g.fillRect(x0, y - 1, W - 40, 2); }
     g.strokeStyle = '#e5e7eb'; g.beginPath(); g.moveTo(x0, y + rowH + .5); g.lineTo(W - 20, y + rowH + .5); g.stroke();
     y += rowH;
   });

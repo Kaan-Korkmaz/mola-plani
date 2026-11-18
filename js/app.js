@@ -191,19 +191,19 @@ function tableHtml(plan, di) {
   const st = state.settings;
   const bad = badMap(plan);
   const { cols, rows } = dayTable(plan, st);
-  const vis = cols.filter((c) => c.t !== 'group');
+  const vis = cols;
   let out = `<div class="tbl-wrap card" style="padding:0"><table class="plan"><thead><tr>${vis.map((c) => `<th class="c-${c.t}">${c.h}</th>`).join('')}</tr></thead><tbody>`;
   for (const row of rows) {
     if (row.poolHeader) { out += `<tr class="pool"><td colspan="${vis.length}">${esc(row.poolHeader)} · ${row.count} kişi</td></tr>`; continue; }
     const r = row.r;
     const evs = [...(r.lunch ? [r.lunch] : []), ...r.breaks];
     const adj = (e) => evs.some((o) => o !== e && (o.end === e.start || e.end === o.start));
-    out += '<tr>';
+    out += `<tr class="${row.groupStart ? 'gstart' : ''}">`;
     cols.forEach((c, i) => {
-      if (c.t === 'group') return;
       const cell = row.cells[i];
+      if (c.t === 'group') { out += `<td class="c-group ${groupClass(r.group)}">${esc(cell.text)}</td>`; return; }
       if (c.t === 'shift') { out += `<td class="sh-${cell.shift} c-shift">${cell.text}</td>`; return; }
-      if (c.t === 'name') { out += `<td class="c-name"><b>${esc(cell.text)}</b> <span class="badge ${groupClass(r.group)}">${esc(r.group)}</span></td>`; return; }
+      if (c.t === 'name') { out += `<td class="c-name"><b>${esc(cell.text)}</b></td>`; return; }
       if (!cell.ev) { out += `<td class="c-ev">—</td>`; return; }
       const e = cell.ev;
       const cls = ['ev', c.t, cell.over ? 'over' : '', bad.has(`${r.id}:${e.start}`) ? 'bad' : adj(e) ? 'adj' : ''].join(' ');

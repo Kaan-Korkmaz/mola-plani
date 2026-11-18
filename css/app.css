@@ -211,3 +211,6 @@ table.grid tr.excluded td { opacity: .45; }
 details > summary { cursor: pointer; }
 
 .wk-bot { display: flex; justify-content: space-between; align-items: center; }
+
+table.plan td.c-group { color: #fff; font-weight: 800; font-size: 13px; letter-spacing: .3px; }
+table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
