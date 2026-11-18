@@ -1,7 +1,7 @@
 import { generateDay, toMin, fmt } from './scheduler.js';
-import { DEFAULT_SETTINGS, DAY_NAMES, NONWORK } from './defaults.js';
+import { DEFAULT_SETTINGS, DAY_NAMES, NONWORK, TRAINING } from './defaults.js';
 import { load, save, reset, ensureWeek, copyWeek, addDays, mondayOf, exportBackup, importBackup, newId } from './store.js';
-import { xlsxBlob, pngBlob, shareOrDownload, dayTable } from './export.js';
+import { xlsxBlob, pngBlob, shareOrDownload, dayTable, shiftTable, shiftXlsxBlob, shiftPngBlob } from './export.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -20,7 +20,7 @@ const dayShort = (i) => { const { m, d } = dateOf(i); return `${d} ${MONTHS[m - 
 const dayTitle = (i) => { const { y, m, d } = dateOf(i); return `${DAY_LONG[i]} ${String(d).padStart(2, '0')}.${String(m).padStart(2, '0')}.${y}`; };
 const isOff = (v) => !v || v in NONWORK;
 const active = () => state.people.filter((p) => !p.deleted);
-const groupClass = (g) => (['B2B', 'B2C', 'Satış', 'Mail'].includes(g) ? `g-${g}` : 'g-other');
+const groupClass = (g) => ({ B2B: 'g-B2B', B2C: 'g-B2C', 'Satış': 'g-Satış', Mail: 'g-Mail' }[g] || 'g-other');
 
 function planFor(i) {
   const w = week();
@@ -88,8 +88,8 @@ function daySection(i, view) {
 
   // O gün çalışmayanlar (OFF / Resmi tatil / İzinli)
   const offs = {};
-  for (const p of active()) { const v = week().shifts[p.id]?.[i]; if (isOff(v)) (offs[v || 'OFF'] ||= []).push(p.label); }
-  const offHtml = Object.keys(offs).length ? `<div class="muted" style="margin-top:6px">${Object.entries(offs).map(([k, names]) => `<b>${NONWORK[k]}:</b> ${esc(names.join(', '))}`).join(' · ')}</div>` : '';
+  for (const p of active()) { const v = week().shifts[p.id]?.[i]; if (isOff(v)) (offs[v || 'OFF'] ||= []).push(p.label); else if (v === TRAINING) (offs.EGT ||= []).push(p.label); }
+  const offHtml = Object.keys(offs).length ? `<div class="muted" style="margin-top:6px">${Object.entries(offs).map(([k, names]) => `<b>${k === 'EGT' ? 'Eğitimde' : NONWORK[k]}:</b> ${esc(names.join(', '))}`).join(' · ')}</div>` : '';
 
   const issuesHtml = errors.length || warns.length
     ? `<ul class="issues">${[...errors, ...warns].map((x) => `<li class="${x.level}">${x.level === 'error' ? '⛔' : '⚠️'} ${esc(x.text)}</li>`).join('')}</ul>`
@@ -313,6 +313,7 @@ function renderVardiya() {
   const st = state.settings;
   const SH = [['S', st.shifts.S], ['O', st.shifts.O], ['A', st.shifts.A]];
   const opts = (v) => SH.map(([k, s]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${s.start}–${s.end}</option>`).join('') +
+    `<option value="${TRAINING}" ${v === TRAINING ? 'selected' : ''}>Eğitim</option>` +
     Object.entries(NONWORK).map(([k, n]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${n}</option>`).join('');
   const gopts = (g) => st.groups.map((x) => `<option ${x === g ? 'selected' : ''}>${esc(x)}</option>`).join('');
   const cards = active().map((p) => {
@@ -326,6 +327,7 @@ function renderVardiya() {
       <div class="wk-mid">
         <select class="sh sh-${allOff ? 'OFF' : sm.main} wk-shift" data-shift="${p.id}" aria-label="Vardiya saati">
           ${SH.map(([k, s]) => `<option value="${k}" ${!allOff && sm.main === k ? 'selected' : ''}>${s.start} – ${s.end}</option>`).join('')}
+          <option value="${TRAINING}" ${!allOff && sm.main === TRAINING ? 'selected' : ''}>Eğitim (mola planına girmez)</option>
           ${allOff ? '<option selected value="">Bu hafta yok</option>' : ''}
         </select>
         ${sm.mixed ? '<span class="muted">bazı günler farklı saatte</span>' : ''}
@@ -357,7 +359,11 @@ function renderVardiya() {
     <div class="row" style="margin:12px 0"><button class="btn primary" id="toPlan">✔ Mola planını gör</button></div>
     <details class="card"><summary><b>Haftalık vardiya planı</b> <span class="muted">— gün gün saat, OFF, Resmi tatil, İzinli</span></summary>
       <div class="tbl-wrap" style="margin-top:8px"><table class="grid"><thead><tr><th>Kişi</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="row" style="margin-top:8px"><button class="btn small danger" id="clearWeek">Haftayı OFF yap</button></div>
+      <div class="row" style="margin-top:8px">
+        <button class="btn small primary" id="shX">📊 Vardiya planı Excel</button>
+        <button class="btn small primary" id="shP">📷 Vardiya planı fotoğrafı</button>
+        <span style="flex:1"></span>
+        <button class="btn small danger" id="clearWeek">Haftayı OFF yap</button></div>
     </details>
     ${state.people.some((p) => p.deleted) ? `<div class="card"><h2>Silinen kişiler</h2>
       <p class="muted" style="margin:0 0 8px">Yanlışlıkla sildiysen geri ekle. İşten ayrılan kişiyi "Tamamen kaldır" ile sil.</p>
@@ -415,6 +421,8 @@ function renderVardiya() {
       persist(); render();
     });
   }));
+  $('#shX').onclick = () => doShift('xlsx');
+  $('#shP').onclick = () => doShift('png');
   $('#addP2').onclick = () => {
     const id = newId(state);
     state.people.push({ id, label: '', group: 'B2C', included: true });
@@ -505,6 +513,13 @@ async function doXlsx(share, onlyDay = false) {
   const name = onlyDay ? `Mola-Plani_${fileDate(state.current.day)}.xlsx` : `Mola-Plani_${state.current.week}.xlsx`;
   report(await shareOrDownload(blob, name, share));
 }
+async function doShift(kind) {
+  const heads = DAY_NAMES.map((n, d) => `${n} ${dayShort(d)}`);
+  const table = shiftTable(active(), week().shifts, state.settings, heads);
+  const title = `Haftalık Vardiya Planı · ${$('#weekLabel').textContent}`;
+  const blob = kind === 'xlsx' ? shiftXlsxBlob(table, title) : await shiftPngBlob(table, title);
+  report(await shareOrDownload(blob, `Vardiya-Plani_${state.current.week}.${kind === 'xlsx' ? 'xlsx' : 'png'}`, true));
+}
 function report(r) { if (r === 'downloaded') toast('İndirildi'); else if (r === 'shared') toast('Paylaşıldı'); }
 
 function renderCikti() {
@@ -515,7 +530,13 @@ function renderCikti() {
       <div class="row">
         <button class="btn primary" data-a="png">📷 Günün fotoğrafı</button>
         <button class="btn primary" data-a="xday">📊 Günün Excel'i</button>
-        <button class="btn primary" data-a="xweek">📊 Haftalık Excel (7 sayfa)</button>
+        <button class="btn primary" data-a="xweek">📊 Haftalık mola Excel'i (7 sayfa)</button>
+      </div>
+      <h2 style="margin-top:14px">Haftalık vardiya planı</h2>
+      <p class="muted" style="margin:0 0 8px">Mola değil, kimin hangi gün hangi vardiyada olduğu (eğitimdekiler, izinliler dahil).</p>
+      <div class="row">
+        <button class="btn primary" data-a="shx">📊 Vardiya planı Excel</button>
+        <button class="btn primary" data-a="shp">📷 Vardiya planı fotoğrafı</button>
       </div>
       ${canShare ? '<p class="muted" style="margin:8px 0 0">Telefonda paylaş menüsü açılır — WhatsApp\'ı seçebilirsin.</p>' : ''}
     </div>
@@ -538,6 +559,8 @@ function renderCikti() {
   v.querySelector('[data-a="png"]').onclick = () => doPng(true);
   v.querySelector('[data-a="xday"]').onclick = () => doXlsx(true, true);
   v.querySelector('[data-a="xweek"]').onclick = () => doXlsx(true);
+  v.querySelector('[data-a="shx"]').onclick = () => doShift('xlsx');
+  v.querySelector('[data-a="shp"]').onclick = () => doShift('png');
   v.querySelector('[data-a="bak"]').onclick = async () => {
     const blob = new Blob([exportBackup(state)], { type: 'application/json' });
     report(await shareOrDownload(blob, `Mola-Plani-yedek_${new Date().toISOString().slice(0, 10)}.json`, false));

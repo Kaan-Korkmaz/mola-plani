@@ -177,3 +177,79 @@ export async function shareOrDownload(blob, name, preferShare) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
   return 'downloaded';
 }
+
+
+// ---------- Haftalık vardiya planı çıktısı (mola değil, vardiya) ----------
+const NW = { OFF: 'OFF', RT: 'Resmi tatil', IZ: 'İzinli', EGT: 'Eğitim' };
+const NW_FILL = { OFF: 'FDE047', RT: 'FCA5A5', IZ: 'C4B5FD', EGT: 'FCD34D' };
+const SHIFT_FILL = { S: '93C5FD', O: '4ADE80', A: 'FB923C' };
+
+/** people: silinmemiş kişiler; shifts: {id: [7]}; dayHeads: ['Pzt 16 Kas', ...] */
+export function shiftTable(people, shifts, st, dayHeads) {
+  const rank = (g) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? GROUP_ORDER.length : i; };
+  const ps = people.map((p, i) => ({ p, i })).sort((a, b) => rank(a.p.group) - rank(b.p.group) || a.i - b.i).map((x) => x.p);
+  const head = ['Operasyon', 'Ad Soyad', ...dayHeads];
+  const rows = ps.map((p) => ({
+    group: p.group,
+    cells: [p.group, p.label, ...(shifts[p.id] || Array(7).fill('OFF')).map((v) =>
+      st.shifts[v] ? { text: `${st.shifts[v].start}–${st.shifts[v].end}`, fill: SHIFT_FILL[v] || 'E5E7EB' } : { text: NW[v] || 'OFF', fill: NW_FILL[v] || NW_FILL.OFF })],
+  }));
+  return { head, rows };
+}
+
+export function shiftXlsxBlob(table, title) {
+  const XLSX = globalThis.XLSX;
+  const aoa = [[title], table.head, ...table.rows.map((r) => r.cells.map((c) => (typeof c === 'string' ? c : c.text)))];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  const cols = table.head.length;
+  const set = (r, c, st) => { const a = XLSX.utils.encode_cell({ r, c }); if (ws[a]) ws[a].s = st; };
+  set(0, 0, { font: { bold: true, sz: 14 } });
+  for (let c = 0; c < cols; c++) set(1, c, S_HEAD);
+  table.rows.forEach((r, i) => r.cells.forEach((c, ci) => {
+    if (ci === 0) set(i + 2, ci, { ...S_C, font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: GROUP_COLOR[r.group] || '6B7280' } } });
+    else if (ci === 1) set(i + 2, ci, { font: { bold: true } });
+    else set(i + 2, ci, { ...S_C, font: { bold: true }, fill: { fgColor: { rgb: c.fill } } });
+  }));
+  ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: cols - 1 } }];
+  ws['!cols'] = [{ wch: 11 }, { wch: 22 }, ...Array(7).fill({ wch: 13 })];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Vardiya planı');
+  const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+
+export async function shiftPngBlob(table, title) {
+  const colW = [100, 190, ...Array(7).fill(118)];
+  const rowH = 32, top = 70;
+  const W = colW.reduce((a, b) => a + b, 0) + 40;
+  const H = top + rowH * (table.rows.length + 1) + 30;
+  const scale = 2;
+  const cv = document.createElement('canvas');
+  cv.width = W * scale; cv.height = H * scale;
+  const g = cv.getContext('2d');
+  g.scale(scale, scale);
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#1e3a8a'; g.font = 'bold 22px system-ui, Segoe UI, sans-serif'; g.fillText(title, 20, 40);
+  const text = (t, x, y, w, color, bold, left) => {
+    g.fillStyle = color; g.font = `${bold ? 'bold ' : ''}13px system-ui, Segoe UI, sans-serif`;
+    g.textAlign = left ? 'left' : 'center'; g.textBaseline = 'middle';
+    g.fillText(t, left ? x + 8 : x + w / 2, y + rowH / 2);
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  };
+  let y = top, x = 20;
+  g.fillStyle = '#111827'; g.fillRect(20, y, W - 40, rowH);
+  table.head.forEach((h, i) => { text(h, x, y, colW[i], '#fff', true); x += colW[i]; });
+  y += rowH;
+  for (const r of table.rows) {
+    x = 20;
+    r.cells.forEach((c, i) => {
+      const fill = i === 0 ? '#' + (GROUP_COLOR[r.group] || '6B7280') : i === 1 ? '#ffffff' : '#' + c.fill;
+      g.fillStyle = fill; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2);
+      text(typeof c === 'string' ? c : c.text, x, y, colW[i], i === 0 ? '#fff' : '#111827', i !== 1 || true, i === 1);
+      x += colW[i];
+    });
+    g.strokeStyle = '#e5e7eb'; g.beginPath(); g.moveTo(20, y + rowH + .5); g.lineTo(W - 20, y + rowH + .5); g.stroke();
+    y += rowH;
+  }
+  return new Promise((res) => cv.toBlob(res, 'image/png'));
+}

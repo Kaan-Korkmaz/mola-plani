@@ -83,3 +83,9 @@ test('elle iki kişi aynı yemeğe konursa çakışma notu yazılır', () => {
   const plan = gen(0, { p3: { lunch: 720 }, p4: { lunch: 720 } });
   assert.ok(plan.issues.some((i) => i.level === 'error' && /yemek 12:00\) ↔ .*yemek 12:00\) çakışıyor/.test(i.text)));
 });
+
+test('eğitim: o gün Eğitim seçilen kişi mola planına girmez, birimi değişmez', () => {
+  const ids = gen(0, {}, SAMPLE_PEOPLE, { ...dayShifts(0), p3: 'EGT' }).rows.map((r) => r.id);
+  assert.ok(!ids.includes('p3'));
+  assert.equal(SAMPLE_PEOPLE.find((p) => p.id === 'p3').group, 'B2C');
+});

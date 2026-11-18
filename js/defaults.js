@@ -22,6 +22,8 @@ export const DEFAULT_SETTINGS = {
 
 // Çalışılmayan gün türleri (vardiya planında seçilir)
 export const NONWORK = { OFF: 'OFF', RT: 'Resmi tatil', IZ: 'İzinli' };
+// Eğitim: kişi o gün çalışıyor (vardiya planında görünür) ama mola planına girmez
+export const TRAINING = 'EGT';
 
 export const DAY_NAMES = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
 

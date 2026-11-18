@@ -223,3 +223,5 @@ table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
 .offc.off-RT { background: #fca5a5; border-color: #ef4444; } .offc.off-IZ { background: #c4b5fd; border-color: #8b5cf6; }
 .toast-btn { margin-left: 10px; background: #fff; color: #111827; border: 0; border-radius: 6px; padding: 4px 10px; font-weight: 700; }
 .del-row { padding: 6px 0; border-top: 1px solid var(--line); }
+
+.sh-EGT { background: #fcd34d; }

@@ -51,6 +51,8 @@ function migrate(s) {
     lunchWindow: { ...d.lunchWindow, ...(s.settings?.lunchWindow || {}) },
     groupPool: { ...d.groupPool, ...(s.settings?.groupPool || {}) },
     poolNames: { ...d.poolNames, ...(s.settings?.poolNames || {}) } };
+  s.settings.groups = s.settings.groups.filter((g) => g !== 'Eğitim');
+  delete s.settings.noBreakGroups;
   s.people ||= [];
   s.weeks ||= {};
   s.current ||= { week: mondayOf(new Date()), day: 0, view: 'grid' };
