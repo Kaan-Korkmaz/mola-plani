@@ -112,6 +112,31 @@ h2 { font-size: 16px; margin: 0 0 8px; }
 .blk.bad { outline: 3px solid var(--bad); outline-offset: 1px; }
 .blk.locked::after { content: "🔒"; position: absolute; top: -9px; right: -4px; font-size: 10px; }
 
+/* Tablo görünümü */
+table.plan { border-collapse: collapse; width: 100%; background: #fff; font-size: 14px; }
+table.plan th { background: #1e3a8a; color: #fff; padding: 9px 6px; font-weight: 700; white-space: nowrap; position: sticky; top: 0; }
+table.plan td { border-bottom: 1px solid var(--line); padding: 5px 6px; text-align: center; white-space: nowrap; }
+table.plan tr.pool td { background: #e0e7ff; color: var(--brand); font-weight: 700; text-align: left; padding: 8px 10px; }
+table.plan td.c-shift { font-weight: 700; font-size: 13px; }
+table.plan td.c-name { text-align: left; }
+table.plan th.c-name { text-align: left; }
+table.plan .ev { border: 1px solid var(--line); background: #f8fafc; border-radius: 8px; padding: 6px 8px; font-weight: 700; color: var(--ink); min-width: 64px; }
+table.plan .ev.lunch { background: #fef3c7; border-color: #fcd34d; }
+table.plan .ev.over { background: var(--bad); border-color: var(--bad); color: #fff; }
+table.plan .ev.adj { background: #fde68a; border-color: #f59e0b; }
+table.plan .ev.bad { background: var(--bad-bg); border: 2px solid var(--bad); color: var(--bad); }
+table.plan .to { font-weight: 400; color: inherit; opacity: .7; }
+.legend { margin: -4px 4px 12px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.lg { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: -6px; vertical-align: middle; }
+.lg.lunch { background: #fef3c7; border: 1px solid #fcd34d; } .lg.over { background: var(--bad); }
+.lg.adj { background: #fde68a; border: 1px solid #f59e0b; } .lg.bad { background: var(--bad-bg); border: 2px solid var(--bad); }
+@media (max-width: 600px) {
+  table.plan { font-size: 13px; }
+  table.plan .to { display: none; }
+  table.plan .ev { min-width: 52px; padding: 6px 4px; }
+  table.plan td, table.plan th { padding: 4px 3px; }
+}
+
 /* Liste görünümü */
 .list { display: grid; gap: 8px; }
 .li { background: #fff; border-radius: 12px; padding: 10px 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
@@ -166,3 +191,6 @@ table.grid tr.excluded td { opacity: .45; }
   .kadro-row { grid-template-columns: 1fr 84px; }
   .kadro-row .switch, .kadro-row .acts { grid-column: span 1; }
 }
+
+.ovbox { margin-top: 10px; padding: 10px; border: 2px solid #fca5a5; border-radius: 10px; background: #fff7f7; }
+.day-sec { margin-bottom: 18px; }

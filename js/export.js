@@ -3,31 +3,44 @@ import { fmt } from './scheduler.js';
 
 const range = (e) => `${fmt(e.start)}–${fmt(e.end)}`;
 
-/** Bir günün planını tabloya çevirir: [{pool, poolName, cells[], over, bad}] */
+/** Sütun düzeni: Vardiya | Kişi | Grup | 1. Mola | 2. Mola | Yemek | 3. Mola (yemek son molanın önünde). */
+export function columns(st) {
+  const k = st.breakCount;
+  const lunchAt = k >= 2 ? k - 1 : k; // kaçıncı moladan önce yemek
+  const cols = [{ t: 'shift', h: 'Vardiya' }, { t: 'name', h: 'Kişi' }, { t: 'group', h: 'Grup' }];
+  for (let i = 0; i < k; i++) {
+    if (i === lunchAt) cols.push({ t: 'lunch', h: 'Yemek' });
+    cols.push({ t: 'break', i, h: `${i + 1}. Mola` });
+  }
+  if (lunchAt >= k) cols.push({ t: 'lunch', h: 'Yemek' });
+  return cols;
+}
+
+/** Bir günün planını tabloya çevirir (uygulama, Excel ve PNG aynı tabloyu kullanır). */
 export function dayTable(plan, st) {
+  const cols = columns(st);
   const pools = [...new Set(plan.rows.map((r) => r.pool))].sort((a, b) => a - b);
   const badIds = new Set(plan.issues.filter((i) => i.level === 'error' && i.personId).map((i) => i.personId));
-  const out = [];
+  const warnIds = new Set(plan.issues.filter((i) => i.level === 'warn' && i.personId).map((i) => i.personId));
+  const rows = [];
   for (const pool of pools) {
     const rs = plan.rows.filter((r) => r.pool === pool).sort((a, b) => a.shiftStart - b.shiftStart || a.order - b.order);
-    out.push({ poolHeader: st.poolNames[pool] || `Havuz ${pool}`, count: rs.length });
+    rows.push({ poolHeader: st.poolNames[pool] || `Havuz ${pool}`, count: rs.length });
     for (const r of rs) {
       const sh = st.shifts[r.shift];
       const br = [...r.breaks].sort((a, b) => a.start - b.start);
-      const cells = [r.label, r.group, `${sh.name} ${sh.start}–${sh.end}`];
-      for (let i = 0; i < Math.max(3, st.breakCount); i++) cells.push(br[i] ? range(br[i]) : (i < st.breakCount ? '—' : ''));
-      cells.push(r.lunch ? range(r.lunch) : '—');
-      out.push({ cells, over: !!r.lunch?.overflow, bad: badIds.has(r.id) });
+      const cells = cols.map((c) => {
+        if (c.t === 'shift') return { text: `${sh.start}–${sh.end}`, shift: r.shift };
+        if (c.t === 'name') return { text: r.label };
+        if (c.t === 'group') return { text: r.group };
+        if (c.t === 'lunch') return r.lunch ? { text: range(r.lunch), ev: r.lunch, key: 'lunch', over: r.lunch.overflow } : { text: '—', key: 'lunch' };
+        const b = br[c.i];
+        return b ? { text: range(b), ev: b, key: b.key } : { text: '—' };
+      });
+      rows.push({ r, cells, over: !!r.lunch?.overflow, bad: badIds.has(r.id), warn: warnIds.has(r.id) });
     }
   }
-  return out;
-}
-
-function headFor(st) {
-  const h = ['Kişi', 'Grup', 'Vardiya'];
-  for (let i = 0; i < Math.max(3, st.breakCount); i++) h.push(`${i + 1}. Mola`);
-  h.push('Yemek');
-  return h;
+  return { cols, rows };
 }
 
 const S_HEAD = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: '1E3A8A' } }, alignment: { horizontal: 'center' } };
@@ -35,15 +48,14 @@ const S_POOL = { font: { bold: true, color: { rgb: '1E3A8A' } }, fill: { fgColor
 const S_OVER = { font: { bold: true, color: { rgb: 'FFFFFF' } }, fill: { fgColor: { rgb: 'DC2626' } }, alignment: { horizontal: 'center' } };
 const S_BAD = { font: { color: { rgb: 'B91C1C' } }, fill: { fgColor: { rgb: 'FEE2E2' } } };
 const S_C = { alignment: { horizontal: 'center' } };
-const SH_FILL = { 'Sabahçı': '93C5FD', 'Öğlenci': '4ADE80', 'Akşamcı': 'FB923C' };
+const SH_FILL = { S: '93C5FD', O: '4ADE80', A: 'FB923C' };
 
 function sheetFor(plan, st, title) {
   const XLSX = globalThis.XLSX;
-  const head = headFor(st);
-  const t = dayTable(plan, st);
+  const { cols: cdef, rows: t } = dayTable(plan, st);
+  const head = cdef.map((c) => c.h);
   const aoa = [[title], head];
-  const styles = [];
-  t.forEach((r) => aoa.push(r.poolHeader ? [`${r.poolHeader} — ${r.count} kişi`] : r.cells));
+  t.forEach((r) => aoa.push(r.poolHeader ? [`${r.poolHeader} — ${r.count} kişi`] : r.cells.map((c) => c.text)));
   const notes = plan.issues.map((i) => `${i.level === 'error' ? '⛔' : '⚠'} ${i.text}`);
   if (notes.length) { aoa.push([]); notes.forEach((n) => aoa.push([n])); }
   const ws = XLSX.utils.aoa_to_sheet(aoa);
@@ -55,11 +67,14 @@ function sheetFor(plan, st, title) {
   t.forEach((r, i) => {
     const R = i + 2;
     if (r.poolHeader) { for (let c = 0; c < cols; c++) set(R, c, S_POOL); merges.push({ s: { r: R, c: 0 }, e: { r: R, c: cols - 1 } }); return; }
-    for (let c = 1; c < cols; c++) set(R, c, r.bad ? { ...S_BAD, ...S_C } : S_C);
-    if (r.bad) set(R, 0, S_BAD);
-    const shName = r.cells[2].split(' ')[0];
-    if (SH_FILL[shName]) set(R, 2, { fill: { fgColor: { rgb: SH_FILL[shName] } }, alignment: { horizontal: 'center' } });
-    if (r.over) set(R, cols - 1, S_OVER);
+    r.cells.forEach((c, ci) => {
+      const t2 = cdef[ci].t;
+      let s = t2 === 'name' ? { font: { bold: true } } : { ...S_C };
+      if (r.bad) s = { ...s, ...S_BAD };
+      if (t2 === 'shift' && SH_FILL[c.shift]) s = { ...S_C, font: { bold: true }, fill: { fgColor: { rgb: SH_FILL[c.shift] } } };
+      if (c.over) s = S_OVER;
+      set(R, ci, s);
+    });
   });
   const noteStart = t.length + 3;
   notes.forEach((n, i) => {
@@ -67,7 +82,7 @@ function sheetFor(plan, st, title) {
     merges.push({ s: { r: noteStart + i, c: 0 }, e: { r: noteStart + i, c: cols - 1 } });
   });
   ws['!merges'] = merges;
-  ws['!cols'] = [{ wch: 16 }, { wch: 8 }, { wch: 22 }, ...Array(cols - 3).fill({ wch: 13 })];
+  ws['!cols'] = cdef.map((c) => ({ wch: c.t === 'name' ? 20 : c.t === 'group' ? 8 : 14 }));
   return ws;
 }
 
@@ -83,10 +98,10 @@ export function xlsxBlob(days, st) {
 
 /** Günün tablosunu PNG olarak çizer. */
 export async function pngBlob(plan, st, title) {
-  const head = headFor(st);
-  const t = dayTable(plan, st);
+  const { cols: cdef, rows: t } = dayTable(plan, st);
+  const head = cdef.map((c) => c.h);
   const notes = plan.issues.map((i) => ({ bad: i.level === 'error', text: i.text }));
-  const colW = [150, 70, 190, ...Array(head.length - 3).fill(110)];
+  const colW = cdef.map((c) => (c.t === 'name' ? 170 : c.t === 'group' ? 70 : c.t === 'shift' ? 130 : 115));
   const W = colW.reduce((a, b) => a + b, 0) + 40;
   const rowH = 34, top = 76;
   const H = top + rowH * (t.length + 1) + (notes.length ? 20 + notes.length * 22 : 0) + 30;
@@ -112,7 +127,7 @@ export async function pngBlob(plan, st, title) {
   g.fillStyle = '#1e3a8a'; g.fillRect(x0, y, W - 40, rowH);
   head.forEach((h, i) => { cellText(h, x, y, colW[i], '#fff', true); x += colW[i]; });
   y += rowH;
-  const shFill = { 'Sabahçı': '#93c5fd', 'Öğlenci': '#4ade80', 'Akşamcı': '#fb923c' };
+  const shFill = { S: '#93c5fd', O: '#4ade80', A: '#fb923c' };
   t.forEach((r, idx) => {
     if (r.poolHeader) {
       g.fillStyle = '#e0e7ff'; g.fillRect(x0, y, W - 40, rowH);
@@ -121,11 +136,11 @@ export async function pngBlob(plan, st, title) {
       g.fillStyle = r.bad ? '#fee2e2' : idx % 2 ? '#f9fafb' : '#ffffff'; g.fillRect(x0, y, W - 40, rowH);
       x = x0;
       r.cells.forEach((c, i) => {
-        const shName = i === 2 ? c.split(' ')[0] : null;
-        if (shName && shFill[shName]) { g.fillStyle = shFill[shName]; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
-        const last = i === r.cells.length - 1;
-        if (last && r.over) { g.fillStyle = '#dc2626'; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
-        cellText(c, x, y, colW[i], last && r.over ? '#fff' : r.bad && i === 0 ? '#b91c1c' : '#111827', i === 0 || (last && r.over), i === 0 ? 'left' : 'center');
+        const t2 = cdef[i].t;
+        if (t2 === 'shift' && shFill[c.shift]) { g.fillStyle = shFill[c.shift]; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
+        if (c.over) { g.fillStyle = '#dc2626'; g.fillRect(x + 1, y + 1, colW[i] - 2, rowH - 2); }
+        const color = c.over ? '#fff' : r.bad && t2 === 'name' ? '#b91c1c' : '#111827';
+        cellText(c.text, x, y, colW[i], color, t2 === 'name' || t2 === 'shift' || !!c.over, t2 === 'name' ? 'left' : 'center');
         x += colW[i];
       });
     }

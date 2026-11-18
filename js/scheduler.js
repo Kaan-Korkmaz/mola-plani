@@ -104,14 +104,15 @@ function planPool(rs, st, mode, locks, issues) {
   const items = [];
   for (const r of rs) {
     const lk = locks[r.id] || {};
-    const tg = breakTargets(r, st);
+    const { targets: tg, before } = breakTargets(r, st);
     for (let k = 0; k < st.breakCount; k++) {
       const key = `b${k}`;
       if (lk[key] != null) r.breaks.push({ start: lk[key], end: lk[key] + B, key, locked: true });
-      else items.push({ r, key, target: tg[k] });
+      else items.push({ r, key, target: tg[k], pre: !!r.lunch && k < before });
     }
   }
-  items.sort((a, b) => a.target - b.target || a.r.order - b.r.order);
+  // Önce yemekten önceki molalar (yemeği erken olan önce — en sıkışık olan), sonra diğerleri.
+  items.sort((a, b) => (b.pre - a.pre) || (a.pre ? a.r.lunch.start - b.r.lunch.start : 0) || a.target - b.target || a.r.order - b.r.order);
 
   const breakOcc = (t, except) =>
     rs.reduce((n, r) => n + r.breaks.filter((b) => b !== except && overlaps(b, { start: t, end: t + Q })).length, 0);
@@ -137,15 +138,16 @@ function planPool(rs, st, mode, locks, issues) {
     return out.sort((a, b) => Math.abs(a - it.target) - Math.abs(b - it.target) || a - b);
   };
 
-  const gaps = [];
-  for (let g = st.minGap; g > 0; g -= Q) gaps.push(g);
-  gaps.push(0);
+  const passes = [];
+  for (let g = st.minGap; g > 0; g -= Q) passes.push([g, true]);
+  passes.push([0, true], [st.minGap, false], [0, false]);
 
   let pending = items;
-  for (const gap of gaps) {
+  for (const [gap, keepSide] of passes) {
     const next = [];
     for (const it of pending) {
-      const s = candidates(it).find((c) => feasible(it, c, gap));
+      const side = (c) => !keepSide || !it.r.lunch || (it.pre ? c + B <= it.r.lunch.start : c >= it.r.lunch.end);
+      const s = candidates(it).find((c) => side(c) && feasible(it, c, gap));
       if (s != null) it.r.breaks.push({ start: s, end: s + B, key: it.key, locked: false });
       else next.push(it);
     }
@@ -186,16 +188,18 @@ function breakTargets(r, st) {
   const B = st.breakMin, k = st.breakCount;
   if (!r.lunch) {
     const span = r.winEnd - B - r.winStart;
-    return Array.from({ length: k }, (_, i) => roundQ(r.winStart + (span * (i + 1)) / (k + 1)));
+    return { targets: Array.from({ length: k }, (_, i) => roundQ(r.winStart + (span * (i + 1)) / (k + 1))), before: 0 };
   }
   const seg1 = [r.winStart, r.lunch.start - B];
   const seg2 = [r.lunch.end, r.winEnd - B];
   const len1 = Math.max(0, seg1[1] - seg1[0]), len2 = Math.max(0, seg2[1] - seg2[0]);
-  let n1 = len1 + len2 > 0 ? Math.round((k * len1) / (len1 + len2)) : 0;
-  if (k > 1 && len1 >= 60 && n1 === 0) n1 = 1;
-  if (k > 1 && len2 >= 60 && n1 === k) n1 = k - 1;
+  // Tercih: son mola hariç hepsi yemekten önce (tablo sırası: 1. Mola, 2. Mola, Yemek, 3. Mola).
+  // Yemekten önce yeterli yer yoksa sığdığı kadar.
+  let n1 = Math.min(k - 1, Math.floor((len1 + B) / (B + 45)));
+  if (len2 < B) n1 = k;
+  n1 = Math.max(0, n1);
   const spread = ([a, b], m) => Array.from({ length: m }, (_, i) => roundQ(a + ((b - a) * (i + 1)) / (m + 1)));
-  return [...spread(seg1, n1), ...spread(seg2, k - n1)];
+  return { targets: [...spread(seg1, n1), ...spread(seg2, k - n1)], before: n1 };
 }
 
 /** Plan üzerindeki kural ihlallerini listeler (elle değişiklikten sonra da kullanılır). */
