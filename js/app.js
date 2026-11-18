@@ -288,29 +288,105 @@ function editEvent(plan, pid, key, di) {
 }
 
 // ---------- VARDİYA ----------
+/** Haftalık satırın özeti: en çok kullanılan vardiya + izinli günler. */
+function weekSummary(arr) {
+  const cnt = {};
+  arr.forEach((v) => { if (v !== 'OFF') cnt[v] = (cnt[v] || 0) + 1; });
+  const keys = Object.keys(cnt);
+  const main = keys.sort((a, b) => cnt[b] - cnt[a])[0] || 'O';
+  return { main, mixed: keys.length > 1, off: arr.map((v, d) => (v === 'OFF' ? d : -1)).filter((d) => d >= 0) };
+}
+
 function renderVardiya() {
   const w = week();
   const st = state.settings;
-  const opts = (v) => [['S', st.shifts.S], ['O', st.shifts.O], ['A', st.shifts.A]]
-    .map(([k, s]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${s.start}–${s.end}</option>`).join('') +
+  const SH = [['S', st.shifts.S], ['O', st.shifts.O], ['A', st.shifts.A]];
+  const opts = (v) => SH.map(([k, s]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${s.start}–${s.end}</option>`).join('') +
     `<option value="OFF" ${v === 'OFF' ? 'selected' : ''}>OFF</option>`;
+  const gopts = (g) => st.groups.map((x) => `<option ${x === g ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  const cards = state.people.map((p) => {
+    const sm = weekSummary(w.shifts[p.id]);
+    const allOff = sm.off.length === 7;
+    return `<div class="wk ${p.included ? '' : 'excluded'}">
+      <div class="wk-top">
+        <input class="wk-name" value="${esc(p.label)}" data-name="${p.id}" placeholder="Ad Soyad" aria-label="Ad Soyad">
+        <select data-grp="${p.id}" aria-label="Kanal">${gopts(p.group)}</select>
+      </div>
+      <div class="wk-mid">
+        <select class="sh sh-${allOff ? 'OFF' : sm.main} wk-shift" data-shift="${p.id}" aria-label="Vardiya saati">
+          ${SH.map(([k, s]) => `<option value="${k}" ${!allOff && sm.main === k ? 'selected' : ''}>${s.start} – ${s.end}</option>`).join('')}
+          ${allOff ? '<option selected value="">Bu hafta yok</option>' : ''}
+        </select>
+        ${sm.mixed ? '<span class="muted">bazı günler farklı saatte</span>' : ''}
+      </div>
+      <div class="wk-off"><span class="muted">İzin:</span>
+        ${DAY_NAMES.map((n, d) => `<button class="offc ${w.shifts[p.id][d] === 'OFF' ? 'on' : ''}" data-off="${p.id}" data-d="${d}">${n}</button>`).join('')}
+      </div>
+      ${p.included ? '' : '<div class="muted" style="font-size:12px">Plana dahil değil (Kadro sekmesinden değişir)</div>'}
+    </div>`;
+  }).join('');
   const head = DAY_NAMES.map((n, d) => `<th>${n}<br><small>${dayShort(d)}</small></th>`).join('');
   const rows = state.people.map((p) => `<tr class="${p.included ? '' : 'excluded'}"><td class="name">${esc(p.label)} <span class="badge ${groupClass(p.group)}">${esc(p.group)}</span></td>
     ${w.shifts[p.id].map((v, d) => `<td><select class="sh sh-${v}" data-pid="${p.id}" data-d="${d}">${opts(v)}</select></td>`).join('')}</tr>`).join('');
   $('#view').innerHTML = `
     <div class="card"><h2>Haftalık vardiya</h2>
-      <p class="muted" style="margin:0">Her hücreye dokunup vardiyayı seç. Soluk satırlar plana dahil değil (Kadro'dan değişir).</p>
+      <div class="row">
+        <div class="field"><label>Haftanın tarihi</label><input type="date" id="wkDate" value="${state.current.week}"></div>
+        <span class="muted">${esc($('#weekLabel').textContent)}</span>
+      </div>
+      <p class="muted" style="margin:8px 0 0">Her kişi için adını, vardiya saatini ve izin günlerini (1–2 gün) seç. Tablo ve molalar otomatik oluşur.</p>
       <div class="row" style="margin-top:8px">
-        <label class="btn small primary">📥 Vardiya Excel'ini yükle<input type="file" id="impX" accept=".xlsx,.xls,.csv" hidden></label>
+        <button class="btn small primary" id="addP2">+ Kişi ekle</button>
         <button class="btn small" id="copyPrev">⟲ Önceki haftayı kopyala</button>
-        <button class="btn small danger" id="clearWeek">Haftayı OFF yap</button>
+        <label class="btn small">📥 Excel'den yükle<input type="file" id="impX" accept=".xlsx,.xls,.csv" hidden></label>
       </div></div>
-    <div class="tbl-wrap card" style="padding:0"><table class="grid"><thead><tr><th>Kişi</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
-  $('#view').querySelectorAll('select.sh').forEach((s) => (s.onchange = () => {
-    w.shifts[s.dataset.pid][+s.dataset.d] = s.value;
-    s.className = `sh sh-${s.value}`;
-    persist();
+    <div class="wk-list">${cards}</div>
+    <div class="row" style="margin:12px 0"><button class="btn primary" id="toPlan">✔ Mola planını gör</button></div>
+    <details class="card"><summary><b>Gün gün tablo</b> <span class="muted">— bir gün farklı saatte çalışan varsa buradan değiştir</span></summary>
+      <div class="tbl-wrap" style="margin-top:8px"><table class="grid"><thead><tr><th>Kişi</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="row" style="margin-top:8px"><button class="btn small danger" id="clearWeek">Haftayı OFF yap</button></div>
+    </details>`;
+  const v = $('#view');
+  const rerender = () => { const y = window.scrollY; const open = v.querySelector('details')?.open; persist(); render(); if (open) v.querySelector('details').open = true; window.scrollTo(0, y); };
+  $('#wkDate').onchange = (e) => {
+    if (!e.target.value) return;
+    const [y, m, d] = e.target.value.split('-').map(Number);
+    state.current.week = mondayOf(new Date(y, m - 1, d)); week(); persist(); render();
+  };
+  v.querySelectorAll('[data-name]').forEach((el) => (el.onchange = () => {
+    const p = state.people.find((x) => x.id === el.dataset.name); p.label = el.value.trim() || p.label || 'İsimsiz'; rerender();
   }));
+  v.querySelectorAll('[data-grp]').forEach((el) => (el.onchange = () => {
+    state.people.find((x) => x.id === el.dataset.grp).group = el.value; rerender();
+  }));
+  v.querySelectorAll('[data-shift]').forEach((el) => (el.onchange = () => {
+    if (!el.value) return;
+    const arr = w.shifts[el.dataset.shift];
+    const allOff = arr.every((x) => x === 'OFF');
+    for (let d = 0; d < 7; d++) if (allOff || arr[d] !== 'OFF') arr[d] = el.value;
+    rerender();
+  }));
+  v.querySelectorAll('[data-off]').forEach((el) => (el.onclick = () => {
+    const arr = w.shifts[el.dataset.off], d = +el.dataset.d;
+    if (arr[d] === 'OFF') arr[d] = weekSummary(arr).main;
+    else {
+      if (arr.filter((x) => x === 'OFF').length >= 2) toast("Not: bu kişinin 2'den fazla izin günü oldu");
+      arr[d] = 'OFF';
+    }
+    rerender();
+  }));
+  v.querySelectorAll('select.sh[data-pid]').forEach((s) => (s.onchange = () => {
+    w.shifts[s.dataset.pid][+s.dataset.d] = s.value; rerender();
+  }));
+  $('#addP2').onclick = () => {
+    const id = newId(state);
+    state.people.push({ id, label: '', group: 'B2C', included: true });
+    for (const wk of Object.values(state.weeks)) wk.shifts[id] = Array(7).fill('OFF');
+    w.shifts[id] = Array(7).fill('O');
+    persist(); render();
+    const inp = [...document.querySelectorAll('.wk-name')].at(-1); inp.scrollIntoView({ block: 'center' }); inp.focus();
+  };
+  $('#toPlan').onclick = () => { tab = 'plan'; state.current.all = true; persist(); render(); window.scrollTo(0, 0); };
   $('#impX').onchange = (e) => { const f = e.target.files[0]; if (f) importShiftFile(f); e.target.value = ''; };
   $('#copyPrev').onclick = () => {
     const prev = addDays(state.current.week, -7);
