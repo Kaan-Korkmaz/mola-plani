@@ -18,6 +18,8 @@ export const DEFAULT_SETTINGS = {
   groups: ['B2B', 'B2C', 'Mail', 'Satış'],
   groupPool: { B2B: 1, B2C: 1, 'Satış': 1, Mail: 2 },
   poolNames: { 1: 'B2B + B2C', 2: 'Mail' },
+  // Excel'den yapıştırırken birim adı farklı yazılmışsa hangi birime sayılacağı
+  groupAliases: { Digital: 'Mail', Dijital: 'Mail', 'E-posta': 'Mail', Sales: 'Satış' },
 };
 
 // Çalışılmayan gün türleri (vardiya planında seçilir)

@@ -2,6 +2,7 @@ import { generateDay, toMin, fmt } from './scheduler.js';
 import { DEFAULT_SETTINGS, DAY_NAMES, NONWORK, TRAINING } from './defaults.js';
 import { load, save, reset, ensureWeek, copyWeek, addDays, mondayOf, exportBackup, importBackup, newId } from './store.js';
 import { xlsxBlob, pngBlob, shareOrDownload, dayTable, shiftTable, shiftXlsxBlob, shiftPngBlob } from './export.js';
+import { parsePaste, weekdayOf } from './excel-yapistir.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -47,7 +48,7 @@ function openModal(html, bind) {
   $('#modalBg').hidden = false;
   bind?.(m);
 }
-function closeModal() { $('#modalBg').hidden = true; $('#modal').innerHTML = ''; }
+function closeModal() { $('#modalBg').hidden = true; $('#modal').innerHTML = ''; $('#modal').classList.remove('wide'); }
 $('#modalBg').addEventListener('click', (e) => { if (e.target.id === 'modalBg') closeModal(); });
 
 function confirmBox(text, okLabel, onOk) {
@@ -352,6 +353,7 @@ function renderVardiya() {
       </div>
       <p class="muted" style="margin:8px 0 0">Her kişi için adını, kanalını, vardiya saatini ve izin günlerini (1–2 gün) seç. Mola tablosu otomatik oluşur. İsimler sadece bu cihazda kalır.</p>
       <div class="row" style="margin-top:8px">
+        <span class="px-pair"><button class="btn small primary" id="pasteX">📋 Excel'den yapıştır</button><button class="info-btn" id="pasteHelp" title="Excel'den yapıştırma nasıl kullanılır?" aria-label="Excel'den yapıştırma nasıl kullanılır?">i</button></span>
         <button class="btn small primary" id="addP2">+ Kişi ekle</button>
         <button class="btn small" id="copyPrev">⟲ Önceki haftayı kopyala</button>
         ${state.people.some((p) => p.deleted) ? `<button class="btn small" id="goDel">🗑 Silinenler (${state.people.filter((p) => p.deleted).length})</button>` : ''}
@@ -426,6 +428,13 @@ function renderVardiya() {
   $('#goDel')?.addEventListener('click', () => $('#delCard').scrollIntoView({ behavior: 'smooth', block: 'center' }));
   $('#shX').onclick = () => doShift('xlsx');
   $('#shP').onclick = () => doShift('png');
+  $('#pasteX').onclick = pasteExcel;
+  $('#pasteHelp').onclick = () => openModal(`<h2>📋 Excel'den yapıştırma — nasıl kullanılır?</h2>${excelHelpHtml()}
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn" data-x>Kapat</button><button class="btn primary" data-go>📋 Yapıştırmaya başla</button></div>`, (m) => {
+    m.classList.add('wide');
+    $('[data-x]', m).onclick = closeModal;
+    $('[data-go]', m).onclick = () => { closeModal(); pasteExcel(); };
+  });
   $('#addP2').onclick = () => {
     const id = newId(state);
     state.people.push({ id, label: '', group: 'B2C', included: true });
@@ -446,6 +455,148 @@ function renderVardiya() {
     for (const id in w.shifts) w.shifts[id] = Array(7).fill('OFF');
     w.days.forEach((d) => (d.locks = {})); persist(); render();
   });
+}
+
+// ---------- EXCEL'DEN YAPIŞTIR ----------
+const mondayKey = (date) => addDays(date, -weekdayOf(date));
+const shortDate = (date) => { const [, m, d] = date.split('-').map(Number); return `${d} ${MONTHS[m - 1]}`; };
+function cellLabel(c) {
+  if (!c) return '—';
+  if (c.resigned) return 'İstifa';
+  if (c.code === TRAINING) return 'Eğitim';
+  if (c.code in NONWORK) return NONWORK[c.code];
+  const sh = state.settings.shifts[c.code];
+  return `${sh.start}–${sh.end}`;
+}
+
+function excelHelpHtml() {
+  const st = state.settings;
+  const al = Object.entries(st.groupAliases || {}).map(([k, v]) => `${esc(k)} → ${esc(v)}`).join(', ');
+  return `<div class="help">
+    <h3>1. Excel'de ne seçmeliyim?</h3>
+    <ul>
+      <li>Tablonun <b>tarih satırından</b> (23-Nov, 24-Nov…) başlayıp <b>son kişinin Pazar hücresine</b> kadar olan alanı fareyle seç.</li>
+      <li>Seçimde şunlar olsun: <b>Ad Soyad</b> sütunu, <b>Birim</b> sütunu (B2B, B2C, Digital, Satış), <b>Pzt…Paz</b> gün sütunları.</li>
+      <li>Sağdaki OFF sayısı sütunu, boş satırlar, renkler ve başlıktaki "23-29 NOV" gibi yazılar seçime girse de sorun olmaz, yok sayılır.</li>
+      <li>Sonra <b>Ctrl+C</b> (Mac'te ⌘+C) ile kopyala.</li>
+    </ul>
+    <h3>2. Uygulamaya nasıl yapıştırırım?</h3>
+    <ul>
+      <li>Kadro → <b>📋 Excel'den yapıştır</b> → açılan kutuya tıkla → <b>Ctrl+V</b>.</li>
+      <li>Yapıştırır yapıştırmaz altta <b>önizleme</b> çıkar: herkesin 7 günü renkli olarak görünür. Henüz hiçbir şey kaydedilmedi.</li>
+      <li>Kontrol et, doğruysa <b>✔ Vardiyaları işle</b>'ye bas. Vazgeçersen hiçbir şey değişmez.</li>
+    </ul>
+    <h3>3. Hücrelerde ne yazabilir?</h3>
+    <ul>
+      <li><b>Saat aralığı:</b> ${['S', 'O', 'A'].map((k) => `${st.shifts[k].start} - ${st.shifts[k].end}`).join(', ')}. "9-18:30" ya da "10.30-20.00" gibi yazımlar da olur.</li>
+      <li><b>OFF</b> (ya da X, Hafta tatili) → izin günü.</li>
+      <li><b>İzinli</b>, Yıllık izin, Rapor → İzinli. <b>Resmi tatil</b>, RT, Bayram → Resmi tatil. <b>Eğitim</b> → çalışıyor ama mola planına girmez.</li>
+      <li><b>ISTIFA</b> → o kişi kadrodan çıkar, Silinen kişiler'e taşınır (önizlemedeki işareti kaldırırsan taşınmaz).</li>
+      <li>Uygulamada olmayan bir saat (ör. 12:00 - 21:00) en yakın vardiyaya sayılır; önizlemede <b style="color:#b45309">turuncu çerçeveyle</b> uyarır.</li>
+      <li>Boş hücre → o gün değiştirilmez.</li>
+    </ul>
+    <h3>4. Kişiler ve birimler</h3>
+    <ul>
+      <li>İsimler kadroyla <b>büyük/küçük harf ve boşluk fark etmeden</b> eşleşir.</li>
+      <li>Kadroda olmayan isim <b>yeni kişi</b> olarak eklenir (önizlemede "yeni" yazar). Silinenlerdeki biri Excel'de çalışıyorsa geri eklenir.</li>
+      <li>Excel'de olmayan kadro kişilerinin vardiyalarına <b>dokunulmaz</b>.</li>
+      <li>Birim Excel'de farklı yazılıyorsa eşleşir: ${al || '—'}. Değiştirmek için Ayarlar → Havuzlar.</li>
+    </ul>
+    <h3>5. Hangi haftaya yazılır?</h3>
+    <ul>
+      <li>Seçimde <b>tarih satırı varsa</b> tarih oradan okunur, doğru haftaya yazılır ve uygulama o haftayı açar.</li>
+      <li>Tarih satırı yoksa <b>şu an seçili haftaya</b> yazılır. Önizlemedeki <b>İlk gün</b> kutusundan tarihi değiştirebilirsin.</li>
+      <li>Aralık iki haftaya taşıyorsa (ör. Perşembe–Çarşamba) her gün kendi haftasına yazılır.</li>
+    </ul>
+    <h3>6. Bilmen gerekenler</h3>
+    <ul>
+      <li>Yapıştırılan günlerdeki vardiyalar Excel'dekiyle <b>değiştirilir</b>. Vardiyası değişen kişinin o günkü elle ayarlanmış molaları sıfırlanır, mola planı yeniden oluşur.</li>
+      <li>"Mola planına dahil" ayarı ve diğer bilgiler korunur.</li>
+      <li>Yanlış yapıştırdıysan aynı Excel'i düzeltip tekrar yapıştırman yeterli.</li>
+    </ul></div>`;
+}
+
+function pasteExcel() {
+  let res = null, start = null;
+  openModal(`
+    <h2>📋 Excel'den vardiya yapıştır</h2>
+    <p class="muted" style="margin:0 0 6px">Excel'de tarih satırından son kişinin Pazar hücresine kadar seç, <b>Ctrl+C</b> ile kopyala, aşağıya <b>Ctrl+V</b> ile yapıştır.</p>
+    <details class="px-help"><summary><span class="info-btn" aria-hidden="true">i</span> Nasıl kullanılır? (ayrıntılı)</summary>${excelHelpHtml()}</details>
+    <textarea id="pxText" rows="4" spellcheck="false" placeholder="Buraya yapıştır…"></textarea>
+    <div id="pxOut"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:12px">
+      <button class="btn" data-x>Vazgeç</button>
+      <button class="btn primary" id="pxApply" disabled>✔ Vardiyaları işle</button>
+    </div>`, (m) => {
+    m.classList.add('wide');
+    const ta = $('#pxText', m), out = $('#pxOut', m), ok = $('#pxApply', m);
+    $('[data-x]', m).onclick = closeModal;
+    const draw = () => {
+      if (!ta.value.trim()) { res = null; out.innerHTML = ''; ok.disabled = true; return; }
+      res = parsePaste(ta.value, { settings: state.settings, people: state.people, fallbackMonday: state.current.week, startDate: start || undefined });
+      ok.disabled = !res.rows.length;
+      if (!res.rows.length) { out.innerHTML = `<ul class="issues">${res.warns.map((w) => `<li class="error">⛔ ${esc(w)}</li>`).join('')}</ul>`; return; }
+      const d = res.dates;
+      const twoWeeks = mondayKey(d[0]) !== mondayKey(d[d.length - 1]);
+      const fresh = res.rows.filter((r) => !r.personId && !r.resigned).length;
+      const resigned = res.rows.filter((r) => r.resigned && r.personId && !r.deleted);
+      const head = d.map((x) => `<th>${DAY_NAMES[weekdayOf(x)]}<br><small>${shortDate(x)}</small></th>`).join('');
+      const rows = res.rows.map((r) => {
+        const tag = r.resigned ? '<span class="pill bad">istifa</span>' : !r.personId ? '<span class="pill">yeni</span>' : r.deleted ? '<span class="pill">geri eklenecek</span>' : '';
+        return `<tr class="${r.resigned ? 'excluded' : ''}"><td class="name">${esc(r.name)} ${tag}</td><td>${esc(r.group || '?')}</td>
+          ${r.cells.map((c) => `<td class="${c && !c.resigned ? 'sh-' + c.code : ''}${c?.warn ? ' px-warn' : ''}" title="${esc(c?.warn || c?.raw || 'boş — değişmez')}">${esc(cellLabel(c))}</td>`).join('')}</tr>`;
+      }).join('');
+      out.innerHTML = `
+        <div class="row" style="margin-top:10px">
+          <div class="field"><label>İlk gün</label><input type="date" id="pxStart" value="${d[0]}"></div>
+          <span class="muted">${shortDate(d[0])} – ${shortDate(d[d.length - 1])} · ${res.detected || start ? "tarih Excel'den alındı" : "Excel'de tarih yok — seçili haftaya yazılacak, gerekirse ilk günü değiştir"}${twoWeeks ? ' · iki haftaya yayılıyor, her gün kendi haftasına yazılır' : ''}</span>
+        </div>
+        <div class="pools" style="margin:8px 0">
+          <span class="pill">${res.rows.length} kişi</span>
+          ${fresh ? `<span class="pill">${fresh} yeni kişi eklenecek</span>` : ''}
+          ${res.rows.some((r) => r.resigned) ? `<span class="pill bad">${res.rows.filter((r) => r.resigned).length} istifa</span>` : ''}
+        </div>
+        <div class="tbl-wrap"><table class="grid px-grid"><thead><tr><th>Kişi</th><th>Birim</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+        ${resigned.length ? `<label class="switch" style="margin-top:8px"><input type="checkbox" id="pxResign" checked> İstifa edenleri (${esc(resigned.map((r) => r.name).join(', '))}) <b>Silinen kişiler</b>'e taşı</label>` : ''}
+        ${res.missing.length ? `<p class="muted" style="margin:8px 0 0">Excel'de olmayanlar (vardiyalarına dokunulmaz): ${esc(res.missing.join(', '))}</p>` : ''}
+        ${res.warns.length ? `<ul class="issues">${res.warns.map((w) => `<li class="warn">⚠️ ${esc(w)}</li>`).join('')}</ul>` : ''}
+        <p class="muted" style="margin:8px 0 0">Bu günlerdeki vardiyalar Excel'dekiyle değiştirilir; değişen günlerde o kişinin elle ayarlanmış molaları sıfırlanır.</p>`;
+      $('#pxStart', out).onchange = (e) => { if (e.target.value) { start = e.target.value; draw(); } };
+    };
+    ta.addEventListener('input', draw);
+    ok.onclick = () => { if (res?.rows.length) applyPaste(res, !!$('#pxResign', m)?.checked); };
+    ta.focus();
+  });
+}
+
+function applyPaste(res, resignDelete) {
+  let added = 0, updated = 0, removed = 0;
+  for (const r of res.rows) {
+    let p = r.personId ? state.people.find((x) => x.id === r.personId) : null;
+    if (r.resigned) {
+      if (p && resignDelete && !p.deleted) { p.deleted = true; removed++; }
+      if (!p || p.deleted) continue;
+    }
+    if (!p) {
+      p = { id: newId(state), label: r.name, group: r.group || 'B2C', included: true };
+      state.people.push(p);
+      for (const wk of Object.values(state.weeks)) wk.shifts[p.id] = Array(7).fill('OFF');
+      added++;
+    } else {
+      if (r.group) p.group = r.group;
+      if (p.deleted) p.deleted = false;
+      updated++;
+    }
+    r.cells.forEach((c, k) => {
+      if (!c) return;
+      const date = res.dates[k], wk = ensureWeek(state, mondayKey(date)), d = weekdayOf(date);
+      if (wk.shifts[p.id][d] !== c.code) { wk.shifts[p.id][d] = c.code; delete wk.days[d].locks[p.id]; }
+    });
+  }
+  state.current.week = mondayKey(res.dates[0]);
+  ensureWeek(state, state.current.week);
+  persist(); closeModal(); render();
+  toast([`${updated + added} kişinin vardiyası işlendi`, added && `${added} yeni kişi`, removed && `${removed} istifa silinenlere taşındı`].filter(Boolean).join(' · '));
 }
 
 // ---------- AYARLAR ----------
@@ -477,6 +628,8 @@ ${time('latestEnd', 'Tüm molalar en geç bitiş', st.latestEnd || '18:30')}
       <div class="grid2">${st.groups.map((g) => `<div class="field"><label>${esc(g)}</label><select data-path="groupPool.${g}" data-num="1">
         ${[1, 2, 3].map((n) => `<option value="${n}" ${st.groupPool[g] === n ? 'selected' : ''}>${n}. havuz</option>`).join('')}</select></div>`).join('')}</div>
       <div class="grid2">${[1, 2, 3].map((n) => `<div class="field"><label>${n}. havuz adı</label><input data-path="poolNames.${n}" value="${esc(st.poolNames[n] || '')}"></div>`).join('')}</div>
+      <div class="field" style="margin-top:8px"><label>Excel'de farklı yazılan birimler (Excel'deki = uygulamadaki)</label>
+        <input id="aliases" value="${esc(Object.entries(st.groupAliases || {}).map(([k, v]) => `${k}=${v}`).join(', '))}" placeholder="Digital=Mail, Sales=Satış"></div>
     </div>
     <div class="card row">
       <button class="btn" id="defSet">Kuralları varsayılana döndür</button>
@@ -493,6 +646,11 @@ ${time('latestEnd', 'Tüm molalar en geç bitiş', st.latestEnd || '18:30')}
     o[last] = val;
     persist(); toast('Kaydedildi');
   }));
+  $('#aliases').onchange = (e) => {
+    st.groupAliases = Object.fromEntries(e.target.value.split(',').map((x) => x.split('=').map((y) => y.trim()))
+      .filter(([k, v]) => k && v && st.groups.includes(v)));
+    persist(); render(); toast('Kaydedildi');
+  };
   $('#defSet').onclick = () => confirmBox('Tüm kurallar varsayılana dönsün mü? (Kadro ve vardiyalar korunur)', 'Döndür', () => {
     state.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)); persist(); render();
   });
@@ -517,6 +675,12 @@ function renderYardim() {
         <li><b>Kadro</b> → <b>+ Kişi ekle</b>.</li>
         <li>Ad soyad yaz, birimini seç (B2B, B2C, Mail, Satış).</li>
         <li>Vardiya saatini seç, izin günlerine dokun.</li></ul>`)}
+      ${q("Excel'deki vardiya planını nasıl aktarırım?", `<ul>
+        <li>Excel'de isimlerden son güne kadar olan alanı seç (tarih ve Pzt/Sal başlıklarıyla birlikte), <b>Ctrl+C</b>.</li>
+        <li>Kadro → <b>📋 Excel'den yapıştır</b> → kutuya <b>Ctrl+V</b>.</li>
+        <li>Önizlemeyi kontrol et, <b>Vardiyaları işle</b>'ye bas. Kadroda olmayan isimler yeni kişi olarak eklenir, "ISTIFA" yazanlar Silinen kişiler'e taşınır.</li>
+        <li>Excel'de tarih yoksa seçili haftaya yazılır; önizlemedeki <b>İlk gün</b>'den değiştirebilirsin.</li>
+        <li>Birim farklı yazıyorsa (Digital → Mail) Ayarlar → Havuzlar'dan eşleştir.</li></ul>`)}
       ${q('Haftanın vardiyası nasıl girilir?', `<ul>
         <li>Kadro'da üstten <b>haftanın tarihini</b> seç.</li>
         <li>Her kartta vardiya saatini seç: 08:00 / 09:00 / 10:30 ya da <b>Eğitim</b>.</li>

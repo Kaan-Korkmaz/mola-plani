@@ -234,3 +234,14 @@ table.plan tr.gstart td { border-top: 3px solid #1e3a8a; }
 .faq summary { padding: 12px 2px; font-weight: 700; cursor: pointer; }
 .faq ul { margin: 0 0 12px; padding-left: 20px; display: grid; gap: 4px; }
 .faq .lg { margin-right: 4px; }
+
+/* Excel'den yapıştır */
+.modal.wide { max-width: 980px; }
+#pxText { width: 100%; box-sizing: border-box; font: 13px/1.4 ui-monospace, Consolas, monospace; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; resize: vertical; }
+.px-grid td { font-size: 12px; white-space: nowrap; text-align: center; }
+.px-grid td.name { text-align: left; }
+.px-grid td.px-warn { outline: 2px solid #f59e0b; outline-offset: -2px; }.px-pair { display: inline-flex; align-items: center; gap: 4px; }
+.info-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--brand); color: var(--brand); background: #fff; font: italic 700 13px/1 Georgia, serif; cursor: pointer; padding: 0; flex: none; }
+.info-btn:hover { background: var(--brand); color: #fff; }
+.px-help { margin: 0 0 8px; } .px-help summary { cursor: pointer; display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--brand); }
+.help h3 { font-size: 14px; margin: 12px 0 4px; } .help ul { margin: 0; padding-left: 18px; } .help li { margin: 3px 0; font-size: 13px; }
