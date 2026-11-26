@@ -1,4 +1,4 @@
-import { generateDay, toMin, fmt } from './scheduler.js';
+import { generateDay, toMin, fmt, orderText } from './scheduler.js';
 import { DEFAULT_SETTINGS, DAY_NAMES, NONWORK, TRAINING } from './defaults.js';
 import { load, save, reset, ensureWeek, copyWeek, addDays, mondayOf, exportBackup, importBackup, newId } from './store.js';
 import { xlsxBlob, pngBlob, shareOrDownload, dayTable, shiftTable, shiftXlsxBlob, shiftPngBlob } from './export.js';
@@ -613,6 +613,7 @@ function renderAyarlar() {
     <div class="card form"><h2>Mola kuralları</h2><div class="grid2">
       ${num('edgeMin', 'İlk/son kaç dk mola yok', st.edgeMin, 15)}
       ${num('breakCount', 'Kısa mola sayısı', st.breakCount)}
+      ${num('breaksBeforeLunch', 'Yemekten önceki mola sayısı', st.breaksBeforeLunch ?? 1)}
       ${num('breakMin', 'Kısa mola (dk)', st.breakMin, 15)}
       ${num('lunchMin', 'Yemek (dk)', st.lunchMin, 15)}
       ${time('lunchWindow.start', 'Yemek başlangıç', st.lunchWindow.start)}
@@ -693,6 +694,7 @@ function renderYardim() {
         <li>Bunlar vardiya planında görünmeye devam eder.</li></ul>`)}
       ${q('Mola planı hangi kurallarla oluşur?', `<ul>
         <li>Kişi başı ${st.breakCount} × ${st.breakMin} dk mola + ${st.lunchMin} dk yemek.</li>
+        <li>Sıra: <b>${orderText(Math.min(st.breaksBeforeLunch ?? 1, st.breakCount), st.breakCount)}</b>. Kalabalık günde sığmayan olursa altta uyarı çıkar.</li>
         <li>Vardiyanın ilk ve son ${st.edgeMin} dk'sında mola yok; tüm molalar en geç <b>${st.latestEnd}</b> biter.</li>
         <li>İki mola arası en az <b>${st.minGap} dk</b>, molasız en fazla <b>${Math.floor((st.maxGap ?? 165) / 60)} sa ${(st.maxGap ?? 165) % 60 ? ((st.maxGap ?? 165) % 60) + ' dk' : ''}</b> çalışılır.</li>
         <li>Yemekler ${st.lunchWindow.start}'de başlar: önce sabahçılar, sonra öğlenciler, en son akşamcılar.</li>

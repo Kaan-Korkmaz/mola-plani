@@ -89,3 +89,14 @@ test('eğitim: o gün Eğitim seçilen kişi mola planına girmez, birimi deği�
   assert.ok(!ids.includes('p3'));
   assert.equal(SAMPLE_PEOPLE.find((p) => p.id === 'p3').group, 'B2C');
 });
+
+test('sıra: Mola → Yemek → Mola → Mola (sakin günlerde herkes, kalabalıkta uymayan uyarılı)', () => {
+  for (let d = 0; d < 7; d++) {
+    const plan = gen(d);
+    for (const r of plan.rows) {
+      const pre = r.breaks.filter((b) => b.start < r.lunch.start).length;
+      if (pre !== 1) assert.ok(plan.issues.some((i) => i.level === 'warn' && i.personId === r.id && /sıra/.test(i.text)), `gün ${d} ${r.label}: sıra bozuk ama uyarı yok`);
+    }
+    if (d >= 3) assert.ok(plan.rows.every((r) => r.breaks.filter((b) => b.start < r.lunch.start).length === 1), `gün ${d}: herkes M-Y-M-M olmalı`);
+  }
+});

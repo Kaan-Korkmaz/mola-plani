@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS = {
   },
   edgeMin: 60,            // vardiyanın ilk ve son X dakikasında mola yok
   breakCount: 3,          // kişi başı kısa mola sayısı
+  breaksBeforeLunch: 1,   // sıra: yemekten önce 1 mola, sonra kalanlar → Mola · Yemek · Mola · Mola
   breakMin: 15,           // kısa mola süresi
   lunchMin: 30,           // yemek süresi
   lunchWindow: { start: '11:00', end: '16:00' }, // yemekler 11:00'de başlar, mümkünse 16:00'da biter (sığmazsa sarkar)

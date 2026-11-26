@@ -17,6 +17,11 @@ const overlaps = (a, b) => a.start < b.end && b.start < a.end;
 const roundQ = (m) => Math.round(m / Q) * Q;
 
 /** Kişinin bir olayı, diğer olaylarına en az `gap` dk uzak mı? */
+/** "Mola → Yemek → Mola → Mola" */
+export function orderText(preT, count) {
+  return [...Array(preT).fill('Mola'), 'Yemek', ...Array(Math.max(0, count - preT)).fill('Mola')].join(' → ');
+}
+
 function farEnough(ev, others, gap) {
   return others.every((o) => ev.end + gap <= o.start || o.end + gap <= ev.start);
 }
@@ -79,6 +84,11 @@ function planPool(rs, st, mode, locks, issues) {
   const lunchOcc = (s, e) => rs.filter((r) => r.lunch && overlaps(r.lunch, { start: s, end: e })).length;
   const lunchCap = (s) => capL + (extraCap[s] || 0);
 
+  // Sıra kuralı (2026-11-26): Mola → Yemek → Mola → Mola. Yemek, önünde preT mola, arkasında kalan molalar
+  // kurallara (ilk/son edgeMin dk, aralar en az minGap) uyarak sığacak saatte olmalı; olmuyorsa en yakın saat + uyarı.
+  const preT = Math.min(st.breaksBeforeLunch ?? 1, st.breakCount), postT = st.breakCount - preT;
+  const lunchLo = (r) => r.winStart + preT * (B + st.minGap);
+  const lunchHi = (r) => r.winEnd - postT * (B + st.minGap); // yemek bu saatte bitmiş olmalı
   for (const r of rs) {
     const lk = locks[r.id]?.lunch;
     if (lk != null) r.lunch = { start: lk, end: lk + L, locked: true };
@@ -99,18 +109,22 @@ function planPool(rs, st, mode, locks, issues) {
       const cands = [];
       for (let s = lw0; s + L <= lw1; s += L) if (s >= r.winStart && s + L <= r.winEnd) cands.push(s);
       cands.sort((a, b) => Math.abs(a - desired) - Math.abs(b - desired) || b - a);
-      const s = cands.find(slotFree);
+      const s = cands.find((x) => x >= lunchLo(r) && x + L <= lunchHi(r) && slotFree(x)) ?? cands.find(slotFree);
       if (s != null) r.lunch = { start: s, end: s + L, locked: false };
     });
   }
   for (const r of ordered) {
     if (r.lunch) continue;
     const limit = strict ? Math.min(lw1, r.winEnd) : r.winEnd;
-    for (let s = lw0; s + L <= limit; s += L) {
-      if (s < r.winStart) continue;
-      let ok = true;
-      for (let t = s; t < s + L; t += Q) if (lunchOcc(t, t + Q) >= lunchCap(s)) { ok = false; break; }
-      if (ok) { r.lunch = { start: s, end: s + L, locked: false }; break; }
+    // önce sıra kuralına uyan saatler, olmazsa izinli herhangi bir saat
+    for (const [lo, hi] of [[lunchLo(r), Math.min(limit, lunchHi(r))], [r.winStart, limit]]) {
+      for (let s = lw0; s + L <= hi; s += L) {
+        if (s < lo) continue;
+        let ok = true;
+        for (let t = s; t < s + L; t += Q) if (lunchOcc(t, t + Q) >= lunchCap(s)) { ok = false; break; }
+        if (ok) { r.lunch = { start: s, end: s + L, locked: false }; break; }
+      }
+      if (r.lunch) break;
     }
     if (!r.lunch) issues.push({ level: 'error', personId: r.id, text: `${r.label}: yemek molası yerleştirilemedi` });
   }
@@ -150,12 +164,17 @@ function planPool(rs, st, mode, locks, issues) {
       issues.push({ level: 'error', personId: r.id, text: `${r.label}: ${MAXG / 60} saat kuralı için ${st.breakCount} mola yetmiyor` });
       for (let i = segs.length - 1; i >= 0 && free < 0; i--) { const cut = Math.min(segs[i].m, -free); segs[i].m -= cut; free += cut; }
     }
+    // Sıra kuralı: yemekten önce toplam preT mola (kilitliler dahil), kalanı yemekten sonra
+    const isPre = (sg) => !!r.lunch && sg.z <= r.lunch.start;
+    let preLeft = preT - r.breaks.filter((b) => r.lunch && b.start < r.lunch.start).length - segs.filter(isPre).reduce((a, sg) => a + sg.m, 0);
+    const bySpace = (x, y) => y.len / (y.m + 1) - x.len / (x.m + 1);
     while (free > 0) {
       const open = segs.filter((s) => s.m < s.cap);
       if (!open.length) break;
-      const pre = open.find((s) => s.preLunch && s.m < st.breakCount - 1);
-      const pick = pre || open.sort((x, y) => y.len / (y.m + 1) - x.len / (x.m + 1))[0];
-      pick.m++; free--;
+      const oPre = open.filter(isPre), oPost = open.filter((sg) => !isPre(sg));
+      const list = preLeft > 0 && oPre.length ? oPre : r.lunch && oPost.length ? oPost : open;
+      const pick = list.sort(bySpace)[0];
+      pick.m++; free--; if (isPre(pick)) preLeft--;
     }
     if (free > 0) issues.push({ level: 'error', personId: r.id, text: `${r.label}: ${free} mola için kurallara uygun boşluk yok — elle yerleştirilemedi` });
     // Tercih edilen dağılım (yemekten önce 2 mola) + diğer geçerli dağılımlar (küçük cezayla)
@@ -167,15 +186,21 @@ function planPool(rs, st, mode, locks, issues) {
       for (let m = Math.min(segs[i].need, pref[i]); m <= Math.min(segs[i].cap, left); m++) { cur.push(m); recA(i + 1, left - m, cur); cur.pop(); }
     };
     recA(0, total, []);
-    let combos = [];
+    // Sıra kuralı kesin: yemekten önceki mola sayısı tercih edilen dağılımdakiyle aynı kalmalı
+    const preSum = (al) => al.reduce((a, m, i) => a + (isPre(segs[i]) ? m : 0), 0);
+    // (kalabalık günde kurala uyan yer kalmazsa diğer sıralar yedek olarak kullanılır, uyarıyla)
+    const want = preSum(pref);
+    let strictC = [], otherC = [];
     for (const al of allocs) {
-      const pen = al.reduce((s, m, i) => s + Math.abs(m - pref[i]), 0) * 45;
+      const ord = preSum(al) === want;
+      const pen = al.reduce((s, m, i) => s + Math.abs(m - pref[i]), 0) * 45 + (ord ? 0 : 1000);
       const sg = segs.map((s, i) => ({ ...s, m: al[i] }));
-      for (const c of combosFor(r, sg, st, G, MAXG, B)) combos.push({ xs: c.xs, cost: c.cost + pen });
+      for (const c of combosFor(r, sg, st, G, MAXG, B)) (ord ? strictC : otherC).push({ xs: c.xs, cost: c.cost + pen });
     }
-    combos.sort((a, b) => a.cost - b.cost);
-    if (combos.length > 3000) combos = combos.slice(0, 3000);
-    people.push({ r, segs, freeKeys, combos });
+    const top = (l) => l.sort((a, b) => a.cost - b.cost).slice(0, 3000);
+    strictC = top(strictC); otherC = top(otherC);
+    const allC = [...strictC, ...otherC].slice(0, 4000);
+    people.push({ r, segs, freeKeys, combos: strictC.length ? strictC : allC, allC });
   }
 
   const blockedQ = new Set();
@@ -297,14 +322,19 @@ function planPool(rs, st, mode, locks, issues) {
     return best;
   };
 
-  // 1) Normal kural: aynı anda capB kişi molada
-  let best = solve(() => capB);
-  // 2) Kalabalık gün: yer yoksa, o saatte YEMEKTE KİMSE YOKKEN capB+1 kişiye izin ver (uyarıyla)
-  let crowded = false;
-  if (best.fails > 0) {
-    const alt = solve((x) => (lunchAt(x) ? capB : capB + 1));
-    if (alt.fails < best.fails) { best = alt; crowded = true; }
+  // Öncelik: 1) sıra kuralı + normal kapasite  2) sıra kuralı + kalabalık gün istisnası (yemekte kimse yokken capB+1)
+  //          3) diğer sıralar da yedek + normal  4) diğer sıralar + kalabalık — en az hatalı olan, eşitse öncekiler
+  const crowdCap = (x) => (lunchAt(x) ? capB : capB + 1);
+  const strictCombos = people.map((p) => p.combos);
+  const tries = [[false, () => capB], [false, crowdCap], [true, () => capB], [true, crowdCap]];
+  let best = null, crowded = false;
+  for (const [all, cap] of tries) {
+    people.forEach((p, i) => { p.combos = all ? p.allC : strictCombos[i]; });
+    const res = solve(cap);
+    if (!best || res.fails < best.fails) { best = res; best._all = all; crowded = cap === crowdCap; }
+    if (best.fails === 0) break;
   }
+  people.forEach((p, i) => { p.combos = best._all ? p.allC : strictCombos[i]; });
 
   for (const p of people) {
     const xs = best.chosen.get(p);
@@ -374,6 +404,12 @@ export function validateDay(plan, st) {
     for (const e of evs) {
       if (e.start < r.winStart || e.end > r.winEnd)
         out.push({ level: 'error', personId: r.id, text: `${r.label}: ${e.name} ${fmt(e.start)}–${fmt(e.end)} izin verilen saatlerin dışında (ilk/son ${st.edgeMin} dk yok, en geç ${st.latestEnd || '—'} bitmeli)` });
+    }
+    if (r.lunch && r.breaks.length === st.breakCount) {
+      const preT = Math.min(st.breaksBeforeLunch ?? 1, st.breakCount);
+      const pre = r.breaks.filter((b) => b.start < r.lunch.start).length;
+      if (pre !== preT)
+        out.push({ level: 'warn', personId: r.id, text: `${r.label}: sıra ${orderText(preT, st.breakCount)} değil — yemekten önce ${pre} mola var (kurallara uyan başka yer kalmadı)` });
     }
     const MAXG = st.maxGap ?? 150;
     const dur = (m) => (m % 60 ? `${Math.floor(m / 60)} sa ${m % 60} dk` : `${m / 60} saat`);
